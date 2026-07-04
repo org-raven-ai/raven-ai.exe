@@ -61,13 +61,17 @@ public partial class App : Application
         var capture = new NAudioCapture();
 
         // --- Azure Speech (live speech-to-text panel) ---
-        var azureRecognizer = new AzureSpeechRecognizer(() =>
+        // Two independent recognizers sharing the same config: one for the interviewee's mic,
+        // one for the interviewer's system audio. They run concurrently.
+        Func<(string apiKey, string endpoint, string language)> azureSpeechConfig = () =>
         (
             apiKey: _store.GetAzureSpeechKey(_settings) ?? string.Empty,
             endpoint: _settings.AzureSpeechEndpoint,
             language: _settings.AzureSpeechRecognitionLanguage
-        ));
-        var speechVm = new SpeechViewModel(azureRecognizer);
+        );
+        var micRecognizer = new AzureSpeechRecognizer(azureSpeechConfig);
+        var systemAudioRecognizer = new AzureSpeechRecognizer(azureSpeechConfig);
+        var speechVm = new SpeechViewModel(micRecognizer, systemAudioRecognizer);
 
         var chatVm = new ChatViewModel(chatProvider, stt, ttsFactory, capture);
         var settingsVm = new SettingsViewModel(_store, _settings);
