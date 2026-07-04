@@ -9,7 +9,7 @@
         Topmost="True"
         WindowStyle="None"
         ResizeMode="CanResizeWithGrip"
-        ShowInTaskbar="True"
+        ShowInTaskbar="False"
         Background="{StaticResource WindowBg}"
         AllowsTransparency="True">
     <!-- NOTE: AllowsTransparency is True so the window can be made translucent via Window.Opacity
