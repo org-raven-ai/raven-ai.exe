@@ -57,16 +57,15 @@ jobs:
         with:
           dotnet-version: '8.0.x'
 
-      - name: Publish standalone single-file win-x64 exe
+      - name: Publish framework-dependent single-file win-x64 exe
         if: steps.resolve.outputs.release == 'true'
-        # IncludeNativeLibrariesForSelfExtract is also set on the CLI (not only in the csproj)
-        # so re-running this workflow against an older tag still embeds the WPF native DLLs
-        # and yields one runnable exe.
+        # Framework-dependent: the exe holds only app code (a few MB) and needs the
+        # .NET 8 Desktop Runtime installed on the target machine to run.
         run: >
           dotnet publish src/RavenAI/RavenAI.csproj
           -c Release -r win-x64
-          -p:PublishSelfContained=true
-          -p:IncludeNativeLibrariesForSelfExtract=true
+          --self-contained false
+          -p:PublishSingleExe=true
           -o publish
 
       - name: Stage release asset

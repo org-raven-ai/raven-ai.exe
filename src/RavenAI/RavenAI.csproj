@@ -16,15 +16,13 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <Version>1.0.0</Version>
 
-    <!-- Small trimmed self-contained publish knobs (used by dotnet publish) -->
-    <RuntimeIdentifier Condition="'$(PublishSelfContained)' == 'true'">win-x64</RuntimeIdentifier>
-    <SelfContained Condition="'$(PublishSelfContained)' == 'true'">true</SelfContained>
-    <PublishSingleFile Condition="'$(PublishSelfContained)' == 'true'">true</PublishSingleFile>
-    <!-- Embed the WPF native DLLs (wpfgfx_cor3, PresentationNative, etc.) into the single file
-         so publish produces ONE runnable raven_ai.exe with no sidecar DLLs to ship. -->
-    <IncludeNativeLibrariesForSelfExtract Condition="'$(PublishSelfContained)' == 'true'">true</IncludeNativeLibrariesForSelfExtract>
-    <!-- WPF cannot be fully trimmed; enable partial trimming only when asked -->
-    <PublishTrimmed Condition="'$(PublishSelfContained)' == 'true'">false</PublishTrimmed>
+    <!-- Framework-dependent single-file publish knobs (used by dotnet publish).
+         The exe contains only app code; it requires the .NET 8 Desktop Runtime
+         on the target machine (Windows shows a download prompt if missing). -->
+    <RuntimeIdentifier Condition="'$(PublishSingleExe)' == 'true'">win-x64</RuntimeIdentifier>
+    <SelfContained Condition="'$(PublishSingleExe)' == 'true'">false</SelfContained>
+    <PublishSingleFile Condition="'$(PublishSingleExe)' == 'true'">true</PublishSingleFile>
+    <DebugType Condition="'$(PublishSingleExe)' == 'true'">none</DebugType>
   </PropertyGroup>
 
   <ItemGroup>
