@@ -126,7 +126,8 @@ public partial class App : Application
         var mainVm = new MainViewModel(chatVm, settingsVm, speechVm, logVm);
 
         var window = new MainWindow(mainVm, new ScreenCaptureProtectionService(),
-                                    new GlobalHotkeyService(), capture);
+                                    new GlobalHotkeyService(), capture,
+                                    new Services.Overlay.InteractiveModeController());
 
         // A later launch signals us on a thread-pool thread; marshal onto the UI thread to
         // un-minimize, center, and foreground the existing window.

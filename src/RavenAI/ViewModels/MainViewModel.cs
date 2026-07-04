@@ -20,6 +20,13 @@ public sealed partial class MainViewModel : ObservableObject
     [ObservableProperty] private bool _isSpeechOpen;
     [ObservableProperty] private bool _isLogOpen;
 
+    /// <summary>
+    /// True while interactive mode is on: the fullscreen overlay is capturing mouse input and
+    /// driving the fake cursor, so the floating panel can be clicked/typed into. False means the
+    /// overlay is fully click-through and every key/click passes to the app underneath.
+    /// </summary>
+    [ObservableProperty] private bool _isInteractive;
+
     // Capture-protection status surfaced to the UI.
     [ObservableProperty] private bool _isProtected;
     [ObservableProperty] private bool _isFullyHidden;
