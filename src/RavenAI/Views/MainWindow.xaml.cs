@@ -64,9 +64,20 @@ public partial class MainWindow : Window
         IntPtr hwnd = new WindowInteropHelper(this).Handle;
 
         HideFromTaskManagerApps(hwnd);
-        ApplyCaptureProtection(hwnd);
         SetupHotkeys(hwnd);
+#if DEBUG
+        // In Debug builds the window stays visible to screen capture so it can be seen while
+        // testing/recording. It's still translucent, just not excluded from capture surfaces.
+        Services.Logging.Log.Warning(
+            "Debug build: screen-capture protection is DISABLED — the window is visible to captures.",
+            null, "Protection");
+        _vm.UpdateProtectionStatus(new CaptureProtectionResult(
+            Success: false, AppliedAffinity: 0, FullyHidden: false, Win32Error: 0,
+            Message: "Debug build: capture protection disabled for testing."));
+#else
+        ApplyCaptureProtection(hwnd);
         StartProtectionWatchdog(hwnd);
+#endif
 
         // Apply any saved transparency and keep it live as the settings slider moves.
         _vm.Settings.WindowOpacityChanged += OnWindowOpacityChanged;
@@ -192,9 +203,12 @@ public partial class MainWindow : Window
             Show();
             WindowState = WindowState.Normal;
             Activate();
+#if !DEBUG
             // Re-apply protection on reshow — affinity can need re-setting after hide.
+            // Skipped in Debug builds where capture protection is disabled for testing.
             IntPtr hwnd = new WindowInteropHelper(this).Handle;
             _vm.UpdateProtectionStatus(_protection.Protect(hwnd));
+#endif
         }
     }
 
