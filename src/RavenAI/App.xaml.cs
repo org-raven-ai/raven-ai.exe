@@ -57,6 +57,13 @@ public partial class App : Application
             systemPrompt: _settings.SystemPrompt
         ));
 
+        // --- Model catalog: lists /models for the Settings dropdowns (fresh key + base URL) ---
+        var modelCatalog = new OpenAIModelCatalog(_http, () =>
+        (
+            apiKey: _store.GetAPIKey(_settings) ?? string.Empty,
+            baseURL: _settings.BaseURL
+        ));
+
         // --- Voice: STT + TTS (provider or offline fallback, chosen at speak time) ---
         var stt = new OpenAISpeechToText(_http, () =>
         (
@@ -94,7 +101,7 @@ public partial class App : Application
         var speechVm = new SpeechViewModel(micRecognizer, systemAudioRecognizer);
 
         var chatVm = new ChatViewModel(chatProvider, stt, ttsFactory, capture);
-        var settingsVm = new SettingsViewModel(_store, _settings);
+        var settingsVm = new SettingsViewModel(_store, _settings, modelCatalog);
         var logVm = new LogViewModel(logger);
         var mainVm = new MainViewModel(chatVm, settingsVm, speechVm, logVm);
 

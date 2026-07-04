@@ -337,18 +337,36 @@
                     <TextBlock Text="Base URL" Foreground="{StaticResource SubtleTextBrush}" />
                     <TextBox Text="{Binding BaseURL}" Margin="0,4,0,8" />
 
+                    <!-- Model dropdowns are editable: they list the ids fetched from the provider's
+                         /models endpoint (the ⟳ button, or auto-loaded when Settings first opens),
+                         but a custom id can still be typed for providers that don't list one. -->
                     <TextBlock Text="Chat Model" Foreground="{StaticResource SubtleTextBrush}" />
-                    <TextBox Text="{Binding Model}" Margin="0,4,0,8" />
+                    <Grid Margin="0,4,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <ComboBox Grid.Column="0" IsEditable="True" IsTextSearchEnabled="True"
+                                  ItemsSource="{Binding AvailableModels}"
+                                  Text="{Binding Model, UpdateSourceTrigger=PropertyChanged}" />
+                        <Button Grid.Column="1" Content="⟳" Command="{Binding RefreshModelsCommand}"
+                                Margin="6,0,0,0" Padding="10,4"
+                                ToolTip="Fetch available models from your provider" />
+                    </Grid>
 
                     <TextBlock Text="System Prompt" Foreground="{StaticResource SubtleTextBrush}" />
                     <TextBox Text="{Binding SystemPrompt}" Margin="0,4,0,8" AcceptsReturn="True" MinHeight="48"
                              TextWrapping="Wrap" />
 
                     <TextBlock Text="Speech-to-Text Model" Foreground="{StaticResource SubtleTextBrush}" />
-                    <TextBox Text="{Binding STTModel}" Margin="0,4,0,8" />
+                    <ComboBox IsEditable="True" IsTextSearchEnabled="True" Margin="0,4,0,8"
+                              ItemsSource="{Binding AvailableModels}"
+                              Text="{Binding STTModel, UpdateSourceTrigger=PropertyChanged}" />
 
                     <TextBlock Text="Text-to-Speech Model" Foreground="{StaticResource SubtleTextBrush}" />
-                    <TextBox Text="{Binding TTSModel}" Margin="0,4,0,8" />
+                    <ComboBox IsEditable="True" IsTextSearchEnabled="True" Margin="0,4,0,8"
+                              ItemsSource="{Binding AvailableModels}"
+                              Text="{Binding TTSModel, UpdateSourceTrigger=PropertyChanged}" />
 
                     <TextBlock Text="TTS Voice" Foreground="{StaticResource SubtleTextBrush}" />
                     <TextBox Text="{Binding TTSVoice}" Margin="0,4,0,8" />
