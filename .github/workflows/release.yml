@@ -29,8 +29,8 @@ jobs:
         id: resolve
         shell: pwsh
         # Tag pushes and manual dispatches always release their tag. Pushes to main
-        # release v<Version> from the csproj, but only if that tag doesn't exist yet —
-        # so bumping <Version> is what cuts a new release.
+        # release v<Version>-<short sha> from the csproj — the sha keeps each push's
+        # tag unique. The ls-remote check only guards against workflow re-runs.
         run: |
           if ('${{ github.event_name }}' -eq 'workflow_dispatch') {
             $tag = '${{ github.event.inputs.tag }}'
@@ -42,7 +42,8 @@ jobs:
           }
           else {
             $version = (Select-Xml -Path src/RavenAI/RavenAI.csproj -XPath '//Version').Node.InnerText
-            $tag = "v$version"
+            $shortSha = '${{ github.sha }}'.Substring(0, 7)
+            $tag = "v$version-$shortSha"
             $existing = git ls-remote --tags origin "refs/tags/$tag"
             $release = if ($existing) { 'false' } else { 'true' }
           }
