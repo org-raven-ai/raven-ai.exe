@@ -7,6 +7,10 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
+# The alpha-release job creates a GitHub prerelease and uploads the exe.
+permissions:
+  contents: write
+
 jobs:
   build:
     # WPF / net8.0-windows can only be built on Windows.
@@ -26,3 +30,67 @@ jobs:
 
       - name: Build (Release)
         run: dotnet build raven_ai.sln -c Release --no-restore
+
+  alpha-release:
+    # Publish a testable alpha build for each PR, so the change can be validated from a real
+    # release before it is merged. Only runs on PRs, and only after the build check passes.
+    if: github.event_name == 'pull_request'
+    needs: build
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout PR head
+        uses: actions/checkout@v4
+        with:
+          # Build the actual PR commit (not the synthetic merge commit) so the exe and the
+          # release tag correspond to what the user reviews.
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Resolve alpha tag
+        id: resolve
+        shell: pwsh
+        # v<Version>-alpha-<short sha> from the csproj. The sha keeps each PR push's tag unique
+        # so testers always grab the build for the latest commit.
+        run: |
+          $version = (Select-Xml -Path src/RavenAI/RavenAI.csproj -XPath '//Version').Node.InnerText
+          $shortSha = '${{ github.event.pull_request.head.sha }}'.Substring(0, 7)
+          $tag = "v$version-alpha-$shortSha"
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+          Write-Host "tag=$tag"
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Publish framework-dependent single-file win-x64 exe
+        # Framework-dependent: the exe holds only app code (a few MB) and needs the
+        # .NET 8 Desktop Runtime installed on the target machine to run.
+        run: >
+          dotnet publish src/RavenAI/RavenAI.csproj
+          -c Release -r win-x64
+          --self-contained false
+          -p:PublishSingleExe=true
+          -o publish
+
+      - name: Stage release asset
+        shell: pwsh
+        run: |
+          $tag = "${{ steps.resolve.outputs.tag }}"
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item publish/raven_ai.exe "dist/raven_ai-$tag-win-x64.exe"
+          Get-ChildItem dist
+
+      - name: Publish GitHub prerelease
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.resolve.outputs.tag }}
+          name: raven_ai ${{ steps.resolve.outputs.tag }}
+          # The tag doesn't exist yet; create it at the PR head commit.
+          target_commitish: ${{ github.event.pull_request.head.sha }}
+          # Mark as a prerelease so alpha test builds never look like stable releases.
+          prerelease: true
+          generate_release_notes: true
+          # Fail loudly if the asset is missing instead of publishing an empty release.
+          fail_on_unmatched_files: true
+          files: dist/raven_ai-*-win-x64.exe

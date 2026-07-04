@@ -22,6 +22,11 @@
     <RuntimeIdentifier Condition="'$(PublishSingleExe)' == 'true'">win-x64</RuntimeIdentifier>
     <SelfContained Condition="'$(PublishSingleExe)' == 'true'">false</SelfContained>
     <PublishSingleFile Condition="'$(PublishSingleExe)' == 'true'">true</PublishSingleFile>
+    <!-- The Speech SDK ships native DLLs (Microsoft.CognitiveServices.Speech.core.dll
+         and its extensions). PublishSingleFile bundles only managed assemblies by
+         default, leaving those natives as loose files. Embed them into the exe so a
+         single shipped file runs without missing-DLL errors. -->
+    <IncludeNativeLibrariesForSelfExtract Condition="'$(PublishSingleExe)' == 'true'">true</IncludeNativeLibrariesForSelfExtract>
     <DebugType Condition="'$(PublishSingleExe)' == 'true'">none</DebugType>
   </PropertyGroup>
 

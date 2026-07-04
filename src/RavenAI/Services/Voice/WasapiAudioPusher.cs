@@ -5,27 +5,40 @@ using NAudio.Wave;
 namespace RavenAI.Services.Voice;
 
 /// <summary>
-/// Captures system playback via WASAPI loopback and feeds it into an Azure Speech
+/// Bridges an NAudio WASAPI capture (a microphone via <see cref="WasapiCapture"/>, or system
+/// playback via <see cref="WasapiLoopbackCapture"/>) into an Azure Speech
 /// <see cref="PushAudioInputStream"/> as 16 kHz / 16-bit / mono PCM (the format recognition
-/// expects). The loopback mix format is typically 48 kHz / 32-bit float / stereo, so a
-/// <see cref="MediaFoundationResampler"/> does the sample-rate + bit-depth + channel conversion
-/// in one step on a background pump thread.
+/// expects). Capture formats are typically 44.1/48 kHz / 32-bit float / stereo, so a
+/// <see cref="MediaFoundationResampler"/> does the sample-rate + bit-depth + channel conversion in
+/// one step on a background pump thread.
+/// <para>
+/// Using our own capture for the microphone — instead of the SDK's built-in
+/// <c>AudioConfig.FromMicrophoneInput</c> — avoids the SDK's slow native device initialization,
+/// which otherwise delays the first transcript by several seconds after start.
+/// </para>
 /// </summary>
-internal sealed class LoopbackAudioPusher : IDisposable
+internal sealed class WasapiAudioPusher : IDisposable
 {
     private static readonly WaveFormat TargetFormat = new(16000, 16, 1); // 16 kHz, 16-bit, mono
 
-    private WasapiLoopbackCapture? _capture;
+    private readonly IWaveIn _capture;
     private BufferedWaveProvider? _buffer;
     private MediaFoundationResampler? _resampler;
     private PushAudioInputStream? _pushStream;
     private Thread? _pump;
     private volatile bool _running;
 
+    /// <param name="capture">
+    /// The WASAPI capture to drain. This class owns it and disposes it. Pass a
+    /// <see cref="WasapiCapture"/> for a microphone or a <see cref="WasapiLoopbackCapture"/> for
+    /// system audio.
+    /// </param>
+    public WasapiAudioPusher(IWaveIn capture) => _capture = capture;
+
     /// <summary>
-    /// True once loopback audio has actually arrived this run. WASAPI stops raising
-    /// <c>DataAvailable</c> when nothing is playing, so this lets the caller distinguish
-    /// "listening but silent" from "actively capturing".
+    /// True once audio has actually arrived this run. WASAPI stops raising <c>DataAvailable</c>
+    /// when nothing is captured, so this lets the caller distinguish "listening but silent" from
+    /// "actively capturing".
     /// </summary>
     public bool AudioReceived { get; private set; }
 
@@ -35,7 +48,6 @@ internal sealed class LoopbackAudioPusher : IDisposable
     /// </summary>
     public AudioConfig CreateAudioConfig()
     {
-        _capture = new WasapiLoopbackCapture();
         // BufferedWaveProvider is internally locked; one writer (DataAvailable) + one reader
         // (the pump) is the supported usage, so no extra synchronization is needed.
         _buffer = new BufferedWaveProvider(_capture.WaveFormat)
@@ -52,12 +64,12 @@ internal sealed class LoopbackAudioPusher : IDisposable
 
     public void Start()
     {
-        if (_capture is null || _pushStream is null)
+        if (_pushStream is null)
             throw new InvalidOperationException("CreateAudioConfig must be called first.");
 
         _capture.DataAvailable += OnDataAvailable;
         _running = true;
-        _pump = new Thread(Pump) { IsBackground = true, Name = "LoopbackAudioPusher" };
+        _pump = new Thread(Pump) { IsBackground = true, Name = "WasapiAudioPusher" };
         _pump.Start();
         _capture.StartRecording();
     }
@@ -76,7 +88,7 @@ internal sealed class LoopbackAudioPusher : IDisposable
     public void Stop()
     {
         _running = false;
-        try { _capture?.StopRecording(); } catch { /* best effort */ }
+        try { _capture.StopRecording(); } catch { /* best effort */ }
         _pump?.Join();
         try { _pushStream?.Close(); } catch { /* best effort */ }
     }
@@ -99,8 +111,7 @@ internal sealed class LoopbackAudioPusher : IDisposable
     {
         Stop();
         _resampler?.Dispose();
-        _capture?.Dispose();
-        _capture = null;
+        _capture.Dispose();
         _resampler = null;
         _buffer = null;
         _pushStream = null;
