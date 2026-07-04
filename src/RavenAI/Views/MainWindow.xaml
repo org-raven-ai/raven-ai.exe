@@ -49,6 +49,8 @@
                 </StackPanel>
 
                 <StackPanel Grid.Column="2" Orientation="Horizontal">
+                    <Button Content="Speech" Command="{Binding ToggleSpeechCommand}"
+                            Background="Transparent" Padding="8,4" />
                     <Button Content="Settings" Command="{Binding ToggleSettingsCommand}"
                             Background="Transparent" Padding="8,4" />
                     <Button Content="—" Click="Minimize_Click" Background="Transparent"
@@ -72,7 +74,7 @@
 
         <!-- ===== Chat surface ===== -->
         <Grid Grid.Row="2"
-              Visibility="{Binding IsSettingsOpen, Converter={StaticResource BoolToVisibility}, ConverterParameter=Invert}">
+              Visibility="{Binding IsChatOpen, Converter={StaticResource BoolToVisibility}}">
             <Grid.RowDefinitions>
                 <RowDefinition Height="*" />
                 <RowDefinition Height="Auto" />
@@ -133,6 +135,68 @@
                         Margin="6,0,0,0" />
             </Grid>
         </Grid>
+
+        <!-- ===== Speech-to-Text panel (overlay) ===== -->
+        <Border Grid.Row="2" Background="{StaticResource WindowBg}"
+                Visibility="{Binding IsSpeechOpen, Converter={StaticResource BoolToVisibility}}">
+            <Grid DataContext="{Binding Speech}">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />  <!-- header -->
+                    <RowDefinition Height="Auto" />  <!-- source + toggle + status -->
+                    <RowDefinition Height="*" />     <!-- transcript -->
+                    <RowDefinition Height="Auto" />  <!-- clear -->
+                </Grid.RowDefinitions>
+
+                <TextBlock Grid.Row="0" Text="Speech-to-Text (Azure)" FontSize="16" FontWeight="Bold"
+                           Foreground="{StaticResource TextBrush}" Margin="16,16,16,8" />
+
+                <StackPanel Grid.Row="1" Margin="16,0,16,12">
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                        <RadioButton Content="Microphone" GroupName="AudioSource"
+                                     IsChecked="{Binding IsMicrophone, Mode=TwoWay}"
+                                     Foreground="{StaticResource TextBrush}" Margin="0,0,16,0" />
+                        <RadioButton Content="System Audio" GroupName="AudioSource"
+                                     IsChecked="{Binding IsSystemAudio, Mode=TwoWay}"
+                                     Foreground="{StaticResource TextBrush}" />
+                    </StackPanel>
+
+                    <Button Command="{Binding ToggleCommand}" Padding="16,8" HorizontalAlignment="Left"
+                            FontSize="14" FontWeight="Bold">
+                        <Button.Style>
+                            <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+                                <Setter Property="Content" Value="● Start listening" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsListening}" Value="True">
+                                        <Setter Property="Content" Value="■ Stop" />
+                                        <Setter Property="Background" Value="{StaticResource WarnBrush}" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Button.Style>
+                    </Button>
+
+                    <TextBlock Text="{Binding Status}" Foreground="{StaticResource SubtleTextBrush}"
+                               Margin="0,8,0,0" FontSize="11" />
+                </StackPanel>
+
+                <Border Grid.Row="2" Background="{StaticResource PanelBg}" Margin="16,0,16,8"
+                        Padding="10" CornerRadius="6">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                        <StackPanel>
+                            <TextBlock Text="{Binding FinalTranscript}" TextWrapping="Wrap"
+                                       Foreground="{StaticResource TextBrush}" FontSize="13" />
+                            <TextBlock Text="{Binding InterimText}" TextWrapping="Wrap"
+                                       Foreground="{StaticResource SubtleTextBrush}" FontSize="13"
+                                       FontStyle="Italic" Margin="0,2,0,0" />
+                        </StackPanel>
+                    </ScrollViewer>
+                </Border>
+
+                <StackPanel Grid.Row="3" Orientation="Horizontal" Margin="16,0,16,16">
+                    <Button Content="Clear" Command="{Binding ClearCommand}" Padding="10,4" />
+                </StackPanel>
+            </Grid>
+        </Border>
 
         <!-- ===== Settings pane (overlay) ===== -->
         <Border Grid.Row="2" Background="{StaticResource WindowBg}"

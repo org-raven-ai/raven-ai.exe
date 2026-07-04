@@ -270,6 +270,7 @@ public partial class MainWindow : Window
         _protectionWatchdog?.Stop();
         _hotkeys.Dispose();
         _capture.Dispose();
+        _vm.Speech.Dispose();
         _hiddenOwner?.Close();
         base.OnClosing(e);
         Application.Current.Shutdown();

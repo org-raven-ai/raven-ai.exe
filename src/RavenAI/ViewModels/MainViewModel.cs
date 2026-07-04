@@ -13,8 +13,10 @@ public sealed partial class MainViewModel : ObservableObject
 {
     public ChatViewModel Chat { get; }
     public SettingsViewModel Settings { get; }
+    public SpeechViewModel Speech { get; }
 
     [ObservableProperty] private bool _isSettingsOpen;
+    [ObservableProperty] private bool _isSpeechOpen;
 
     // Capture-protection status surfaced to the UI.
     [ObservableProperty] private bool _isProtected;
@@ -24,10 +26,14 @@ public sealed partial class MainViewModel : ObservableObject
     /// <summary>True when a warning banner should be shown (protection missing or degraded).</summary>
     public bool ShowProtectionWarning => !IsProtected || !IsFullyHidden;
 
-    public MainViewModel(ChatViewModel chat, SettingsViewModel settings)
+    /// <summary>True when the chat surface is visible (no settings/speech overlay open).</summary>
+    public bool IsChatOpen => !IsSettingsOpen && !IsSpeechOpen;
+
+    public MainViewModel(ChatViewModel chat, SettingsViewModel settings, SpeechViewModel speech)
     {
         Chat = chat;
         Settings = settings;
+        Speech = speech;
         Settings.Saved += () => IsSettingsOpen = false;
     }
 
@@ -42,7 +48,20 @@ public sealed partial class MainViewModel : ObservableObject
 
     partial void OnIsProtectedChanged(bool value) => OnPropertyChanged(nameof(ShowProtectionWarning));
     partial void OnIsFullyHiddenChanged(bool value) => OnPropertyChanged(nameof(ShowProtectionWarning));
+    partial void OnIsSettingsOpenChanged(bool value) => OnPropertyChanged(nameof(IsChatOpen));
+    partial void OnIsSpeechOpenChanged(bool value) => OnPropertyChanged(nameof(IsChatOpen));
 
     [RelayCommand]
-    private void ToggleSettings() => IsSettingsOpen = !IsSettingsOpen;
+    private void ToggleSettings()
+    {
+        IsSettingsOpen = !IsSettingsOpen;
+        if (IsSettingsOpen) IsSpeechOpen = false; // panes are mutually exclusive
+    }
+
+    [RelayCommand]
+    private void ToggleSpeech()
+    {
+        IsSpeechOpen = !IsSpeechOpen;
+        if (IsSpeechOpen) IsSettingsOpen = false; // panes are mutually exclusive
+    }
 }

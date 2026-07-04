@@ -60,9 +60,18 @@ public partial class App : Application
 
         var capture = new NAudioCapture();
 
+        // --- Azure Speech (live speech-to-text panel) ---
+        var azureRecognizer = new AzureSpeechRecognizer(() =>
+        (
+            apiKey: _store.GetAzureSpeechKey(_settings) ?? string.Empty,
+            endpoint: _settings.AzureSpeechEndpoint,
+            language: _settings.AzureSpeechRecognitionLanguage
+        ));
+        var speechVm = new SpeechViewModel(azureRecognizer);
+
         var chatVm = new ChatViewModel(chatProvider, stt, ttsFactory, capture);
         var settingsVm = new SettingsViewModel(_store, _settings);
-        var mainVm = new MainViewModel(chatVm, settingsVm);
+        var mainVm = new MainViewModel(chatVm, settingsVm, speechVm);
 
         var window = new MainWindow(mainVm, new ScreenCaptureProtectionService(),
                                     new GlobalHotkeyService(), capture);
