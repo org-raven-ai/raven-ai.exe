@@ -64,7 +64,9 @@ public sealed partial class SpeechViewModel : ObservableObject, IDisposable
     [ObservableProperty] private string _interimText = string.Empty;
     [ObservableProperty] private string _finalTranscript = string.Empty;
 
-    [RelayCommand]
+    // Disable the button while start/stop is in flight so a double-click can't enter the
+    // async path twice and create a second recognizer (leaking the first).
+    [RelayCommand(AllowConcurrentExecutions = false)]
     private async Task ToggleAsync()
     {
         if (IsListening)
