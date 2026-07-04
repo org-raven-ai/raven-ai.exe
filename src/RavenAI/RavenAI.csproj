@@ -20,6 +20,9 @@
     <RuntimeIdentifier Condition="'$(PublishSelfContained)' == 'true'">win-x64</RuntimeIdentifier>
     <SelfContained Condition="'$(PublishSelfContained)' == 'true'">true</SelfContained>
     <PublishSingleFile Condition="'$(PublishSelfContained)' == 'true'">true</PublishSingleFile>
+    <!-- Embed the WPF native DLLs (wpfgfx_cor3, PresentationNative, etc.) into the single file
+         so publish produces ONE runnable raven_ai.exe with no sidecar DLLs to ship. -->
+    <IncludeNativeLibrariesForSelfExtract Condition="'$(PublishSelfContained)' == 'true'">true</IncludeNativeLibrariesForSelfExtract>
     <!-- WPF cannot be fully trimmed; enable partial trimming only when asked -->
     <PublishTrimmed Condition="'$(PublishSelfContained)' == 'true'">false</PublishTrimmed>
   </PropertyGroup>

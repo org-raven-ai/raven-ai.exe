@@ -29,18 +29,24 @@ jobs:
         with:
           dotnet-version: '8.0.x'
 
-      - name: Publish self-contained win-x64
+      - name: Publish standalone single-file win-x64 exe
+        # IncludeNativeLibrariesForSelfExtract is also set on the CLI (not only in the csproj)
+        # so re-running this workflow against an older tag still embeds the WPF native DLLs
+        # and yields one runnable exe.
         run: >
           dotnet publish src/RavenAI/RavenAI.csproj
           -c Release -r win-x64
           -p:PublishSelfContained=true
+          -p:IncludeNativeLibrariesForSelfExtract=true
           -o publish
 
-      - name: Package release zip
+      - name: Stage release asset
         shell: pwsh
         run: |
           $tag = "${{ github.event.inputs.tag || github.ref_name }}"
-          Compress-Archive -Path publish/* -DestinationPath "raven_ai-$tag-win-x64.zip" -Force
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item publish/raven_ai.exe "dist/raven_ai-$tag-win-x64.exe"
+          Get-ChildItem dist
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
@@ -48,4 +54,6 @@ jobs:
           tag_name: ${{ github.event.inputs.tag || github.ref_name }}
           name: raven_ai ${{ github.event.inputs.tag || github.ref_name }}
           generate_release_notes: true
-          files: raven_ai-*-win-x64.zip
+          # Fail loudly if the asset is missing instead of publishing an empty release.
+          fail_on_unmatched_files: true
+          files: dist/raven_ai-*-win-x64.exe
