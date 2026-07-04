@@ -14,9 +14,11 @@ public sealed partial class MainViewModel : ObservableObject
     public ChatViewModel Chat { get; }
     public SettingsViewModel Settings { get; }
     public SpeechViewModel Speech { get; }
+    public LogViewModel Log { get; }
 
     [ObservableProperty] private bool _isSettingsOpen;
     [ObservableProperty] private bool _isSpeechOpen;
+    [ObservableProperty] private bool _isLogOpen;
 
     // Capture-protection status surfaced to the UI.
     [ObservableProperty] private bool _isProtected;
@@ -26,14 +28,15 @@ public sealed partial class MainViewModel : ObservableObject
     /// <summary>True when a warning banner should be shown (protection missing or degraded).</summary>
     public bool ShowProtectionWarning => !IsProtected || !IsFullyHidden;
 
-    /// <summary>True when the chat surface is visible (no settings/speech overlay open).</summary>
-    public bool IsChatOpen => !IsSettingsOpen && !IsSpeechOpen;
+    /// <summary>True when the chat surface is visible (no overlay open).</summary>
+    public bool IsChatOpen => !IsSettingsOpen && !IsSpeechOpen && !IsLogOpen;
 
-    public MainViewModel(ChatViewModel chat, SettingsViewModel settings, SpeechViewModel speech)
+    public MainViewModel(ChatViewModel chat, SettingsViewModel settings, SpeechViewModel speech, LogViewModel log)
     {
         Chat = chat;
         Settings = settings;
         Speech = speech;
+        Log = log;
         Settings.Saved += () => IsSettingsOpen = false;
     }
 
@@ -50,18 +53,26 @@ public sealed partial class MainViewModel : ObservableObject
     partial void OnIsFullyHiddenChanged(bool value) => OnPropertyChanged(nameof(ShowProtectionWarning));
     partial void OnIsSettingsOpenChanged(bool value) => OnPropertyChanged(nameof(IsChatOpen));
     partial void OnIsSpeechOpenChanged(bool value) => OnPropertyChanged(nameof(IsChatOpen));
+    partial void OnIsLogOpenChanged(bool value) => OnPropertyChanged(nameof(IsChatOpen));
 
     [RelayCommand]
     private void ToggleSettings()
     {
         IsSettingsOpen = !IsSettingsOpen;
-        if (IsSettingsOpen) IsSpeechOpen = false; // panes are mutually exclusive
+        if (IsSettingsOpen) { IsSpeechOpen = false; IsLogOpen = false; } // panes are mutually exclusive
     }
 
     [RelayCommand]
     private void ToggleSpeech()
     {
         IsSpeechOpen = !IsSpeechOpen;
-        if (IsSpeechOpen) IsSettingsOpen = false; // panes are mutually exclusive
+        if (IsSpeechOpen) { IsSettingsOpen = false; IsLogOpen = false; } // panes are mutually exclusive
+    }
+
+    [RelayCommand]
+    private void ToggleLog()
+    {
+        IsLogOpen = !IsLogOpen;
+        if (IsLogOpen) { IsSettingsOpen = false; IsSpeechOpen = false; } // panes are mutually exclusive
     }
 }

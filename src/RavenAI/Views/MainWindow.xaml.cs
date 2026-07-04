@@ -41,6 +41,13 @@ public partial class MainWindow : Window
         DataContext = _vm;
         InitializeComponent();
 
+        // Keep the log panel pinned to the newest entry as errors/events stream in.
+        _vm.Log.Entries.CollectionChanged += (_, e) =>
+        {
+            if (e.Action == System.Collections.Specialized.NotifyCollectionChangedAction.Add)
+                LogScroll.ScrollToEnd();
+        };
+
         // Place near the top-right of the working area by default.
         var wa = SystemParameters.WorkArea;
         Left = wa.Right - Width - 24;
@@ -121,10 +128,12 @@ public partial class MainWindow : Window
         _vm.UpdateProtectionStatus(result);
 
         // Fail loudly: the banner (bound to ShowProtectionWarning) covers the visible warning.
-        // Also log to the debugger for diagnostics — but never anything sensitive.
-        System.Diagnostics.Debug.WriteLine($"[raven_ai] Capture protection: {result.Message} " +
-                                           $"(success={result.Success}, fullyHidden={result.FullyHidden}, " +
-                                           $"win32={result.Win32Error})");
+        // Also record to the unified logger for diagnostics — never anything sensitive.
+        string detail = $"success={result.Success}, fullyHidden={result.FullyHidden}, win32={result.Win32Error}";
+        if (result.Success && result.FullyHidden)
+            Services.Logging.Log.Info($"Capture protection active: {result.Message} ({detail})", "Protection");
+        else
+            Services.Logging.Log.Warning($"Capture protection degraded: {result.Message} ({detail})", null, "Protection");
     }
 
     /// <summary>

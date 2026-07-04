@@ -9,6 +9,7 @@
             <views:BoolToBubbleBrushConverter x:Key="BoolToBubbleBrush" />
             <views:BoolToVisibilityConverter x:Key="BoolToVisibility" />
             <views:StringToVisibilityConverter x:Key="StringToVisibility" />
+            <views:LogLevelToBrushConverter x:Key="LogLevelToBrush" />
 
             <!-- Minimal dark palette -->
             <SolidColorBrush x:Key="WindowBg" Color="#1E1E22" />

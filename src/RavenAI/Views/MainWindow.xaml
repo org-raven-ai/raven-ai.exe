@@ -51,6 +51,8 @@
                 <StackPanel Grid.Column="2" Orientation="Horizontal">
                     <Button Content="Speech" Command="{Binding ToggleSpeechCommand}"
                             Background="Transparent" Padding="8,4" />
+                    <Button Content="Logs" Command="{Binding ToggleLogCommand}"
+                            Background="Transparent" Padding="8,4" />
                     <Button Content="Settings" Command="{Binding ToggleSettingsCommand}"
                             Background="Transparent" Padding="8,4" />
                     <Button Content="—" Click="Minimize_Click" Background="Transparent"
@@ -231,6 +233,88 @@
                                 ContentTemplate="{StaticResource SpeechChannelTemplate}" />
                 <ContentControl Grid.Row="2" Content="{Binding Interviewer}"
                                 ContentTemplate="{StaticResource SpeechChannelTemplate}" />
+            </Grid>
+        </Border>
+
+        <!-- ===== Log panel (overlay) ===== -->
+        <!-- Live view of the unified logger: every error/exception/event, mirrored from the same
+             sink that writes the log file. Newest entries append at the bottom. -->
+        <Border Grid.Row="2" Background="{StaticResource WindowBg}"
+                Visibility="{Binding IsLogOpen, Converter={StaticResource BoolToVisibility}}">
+            <Grid DataContext="{Binding Log}" Margin="16,16,16,12">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />  <!-- header + actions -->
+                    <RowDefinition Height="*" />     <!-- entry list -->
+                    <RowDefinition Height="Auto" />  <!-- file path footer -->
+                </Grid.RowDefinitions>
+
+                <!-- Header row -->
+                <Grid Grid.Row="0" Margin="0,0,0,8">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+
+                    <TextBlock Grid.Column="0" Text="Logs" FontSize="16" FontWeight="Bold"
+                               Foreground="{StaticResource TextBrush}" VerticalAlignment="Center" />
+                    <Button Grid.Column="1" Content="Copy" Command="{Binding CopyAllCommand}"
+                            Padding="10,4" Margin="6,0,0,0" Background="#555" />
+                    <Button Grid.Column="2" Content="Folder" Command="{Binding OpenLogFolderCommand}"
+                            Padding="10,4" Margin="6,0,0,0" Background="#555"
+                            ToolTip="Open the log file's folder" />
+                    <Button Grid.Column="3" Content="Clear" Command="{Binding ClearCommand}"
+                            Padding="10,4" Margin="6,0,0,0" Background="#555"
+                            ToolTip="Clear the on-screen list (the file is not touched)" />
+                </Grid>
+
+                <!-- Entry list. Auto-scrolls to newest via ScrollViewer in code-behind if needed;
+                     here we simply rely on the list growing downward. -->
+                <Border Grid.Row="1" Background="{StaticResource PanelBg}" CornerRadius="6" Padding="4">
+                    <ScrollViewer x:Name="LogScroll" VerticalScrollBarVisibility="Auto">
+                        <ItemsControl ItemsSource="{Binding Entries}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Grid Margin="4,3">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+
+                                        <TextBlock Grid.Column="0" Text="{Binding TimeText}"
+                                                   Foreground="{StaticResource SubtleTextBrush}"
+                                                   FontFamily="Consolas" FontSize="11"
+                                                   VerticalAlignment="Top" Margin="0,0,8,0" />
+                                        <TextBlock Grid.Column="1" Text="{Binding LevelText}"
+                                                   Foreground="{Binding Level, Converter={StaticResource LogLevelToBrush}}"
+                                                   FontFamily="Consolas" FontSize="11" FontWeight="Bold"
+                                                   VerticalAlignment="Top" Margin="0,0,8,0" />
+                                        <StackPanel Grid.Column="2">
+                                            <TextBlock TextWrapping="Wrap" FontSize="12"
+                                                       Foreground="{StaticResource TextBrush}">
+                                                <Run Text="{Binding Category, Mode=OneWay}" FontWeight="Bold"
+                                                     Foreground="{StaticResource SubtleTextBrush}" />
+                                                <Run Text="  " />
+                                                <Run Text="{Binding Message, Mode=OneWay}" />
+                                            </TextBlock>
+                                            <TextBlock Text="{Binding Detail}" TextWrapping="Wrap"
+                                                       FontFamily="Consolas" FontSize="11"
+                                                       Foreground="{StaticResource SubtleTextBrush}"
+                                                       Margin="0,2,0,0"
+                                                       Visibility="{Binding HasDetail, Converter={StaticResource BoolToVisibility}}" />
+                                        </StackPanel>
+                                    </Grid>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </ScrollViewer>
+                </Border>
+
+                <TextBlock Grid.Row="2" Text="{Binding LogFilePath}" FontSize="11"
+                           Foreground="{StaticResource SubtleTextBrush}" TextTrimming="CharacterEllipsis"
+                           Margin="0,8,0,0" ToolTip="{Binding LogFilePath}" />
             </Grid>
         </Border>
 

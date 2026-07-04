@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Windows;
 using System.Windows.Data;
 using System.Windows.Media;
+using RavenAI.Services.Logging;
 
 namespace RavenAI.Views;
 
@@ -47,6 +48,27 @@ public sealed class StringToVisibilityConverter : IValueConverter
 {
     public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
         => string.IsNullOrEmpty(value as string) ? Visibility.Collapsed : Visibility.Visible;
+
+    public object ConvertBack(object value, Type t, object p, CultureInfo c)
+        => throw new NotSupportedException();
+}
+
+/// <summary>Colours a log entry's level tag: red for errors, amber for warnings, muted otherwise.</summary>
+public sealed class LogLevelToBrushConverter : IValueConverter
+{
+    private static readonly Brush ErrorBrush = new SolidColorBrush(Color.FromRgb(0xFF, 0x6B, 0x6B));
+    private static readonly Brush WarningBrush = new SolidColorBrush(Color.FromRgb(0xF0, 0xB1, 0x32));
+    private static readonly Brush InfoBrush = new SolidColorBrush(Color.FromRgb(0x8A, 0xB4, 0xF8));
+    private static readonly Brush DebugBrush = new SolidColorBrush(Color.FromRgb(0x9A, 0x9A, 0xA2));
+
+    public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
+        => value switch
+        {
+            LogLevel.Error => ErrorBrush,
+            LogLevel.Warning => WarningBrush,
+            LogLevel.Info => InfoBrush,
+            _ => DebugBrush,
+        };
 
     public object ConvertBack(object value, Type t, object p, CultureInfo c)
         => throw new NotSupportedException();
