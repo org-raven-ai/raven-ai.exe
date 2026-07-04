@@ -182,10 +182,51 @@ public partial class MainWindow : Window
 
     // ---- Window chrome interactions -------------------------------------------------------
 
+    // Manual title-bar drag. DragMove() enters the OS modal move loop, which triggers
+    // Snap Layouts / Snap Assist hints — wrong for an overlay. Moving Left/Top ourselves
+    // keeps the drag invisible to the shell, so no snap UI ever appears.
+    private bool _dragging;
+    private System.Windows.Point _dragCursorStart;   // cursor at drag start, in device pixels
+    private double _dragWindowLeft;   // window position at drag start, in DIUs
+    private double _dragWindowTop;
+
     private void TitleBar_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
-        if (e.ButtonState == MouseButtonState.Pressed)
-            DragMove();
+        if (e.ButtonState != MouseButtonState.Pressed)
+            return;
+
+        _dragCursorStart = PointToScreen(e.GetPosition(this));
+        _dragWindowLeft = Left;
+        _dragWindowTop = Top;
+        _dragging = ((UIElement)sender).CaptureMouse();
+    }
+
+    private void TitleBar_MouseMove(object sender, System.Windows.Input.MouseEventArgs e)
+    {
+        if (!_dragging)
+            return;
+
+        // Work in device pixels, then convert the delta to DIUs so per-monitor DPI is honoured.
+        System.Windows.Point cursor = PointToScreen(e.GetPosition(this));
+        var source = PresentationSource.FromVisual(this);
+        if (source?.CompositionTarget is null)
+            return;
+
+        System.Windows.Point delta = source.CompositionTarget.TransformFromDevice.Transform(
+            new System.Windows.Point(cursor.X - _dragCursorStart.X, cursor.Y - _dragCursorStart.Y));
+        Left = _dragWindowLeft + delta.X;
+        Top = _dragWindowTop + delta.Y;
+    }
+
+    private void TitleBar_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        if (_dragging)
+            ((UIElement)sender).ReleaseMouseCapture();
+    }
+
+    private void TitleBar_LostMouseCapture(object sender, System.Windows.Input.MouseEventArgs e)
+    {
+        _dragging = false;
     }
 
     private void Minimize_Click(object sender, RoutedEventArgs e) => Hide();

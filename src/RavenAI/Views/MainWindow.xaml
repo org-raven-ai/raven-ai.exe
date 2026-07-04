@@ -28,7 +28,11 @@
         </Grid.RowDefinitions>
 
         <!-- ===== Title bar (drag to move) ===== -->
-        <Border Grid.Row="0" Background="{StaticResource PanelBg}" MouseLeftButtonDown="TitleBar_MouseLeftButtonDown">
+        <Border Grid.Row="0" Background="{StaticResource PanelBg}"
+                MouseLeftButtonDown="TitleBar_MouseLeftButtonDown"
+                MouseMove="TitleBar_MouseMove"
+                MouseLeftButtonUp="TitleBar_MouseLeftButtonUp"
+                LostMouseCapture="TitleBar_LostMouseCapture">
             <Grid Margin="10,6">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto" />
