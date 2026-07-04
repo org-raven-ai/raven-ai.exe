@@ -192,6 +192,41 @@ public partial class MainWindow : Window
         }
     }
 
+    /// <summary>
+    /// Brings the overlay back to the user in response to a second launch attempt (the
+    /// single-instance guard forwards the request here). Un-hides, un-minimizes, re-centers on
+    /// the working area, and forces the window to the foreground.
+    /// </summary>
+    public void SurfaceFromOtherInstance()
+    {
+        if (!IsVisible)
+            Show();
+        if (WindowState == WindowState.Minimized)
+            WindowState = WindowState.Normal;
+
+        CenterOnWorkArea();
+
+#if !DEBUG
+        // Show()/reshow can drop the affinity — re-apply as we do on the hotkey toggle path.
+        IntPtr hwnd = new WindowInteropHelper(this).Handle;
+        _vm.UpdateProtectionStatus(_protection.Protect(hwnd));
+#endif
+
+        Activate();
+        // Topmost flip forces the window to the top of the Z-order even when another app owns
+        // the foreground (Windows won't hand focus over on Activate() alone).
+        Topmost = false;
+        Topmost = true;
+    }
+
+    /// <summary>Centers the window within the current monitor's working area (excludes taskbar).</summary>
+    private void CenterOnWorkArea()
+    {
+        var wa = SystemParameters.WorkArea;
+        Left = wa.Left + (wa.Width - Width) / 2;
+        Top = wa.Top + (wa.Height - Height) / 2;
+    }
+
     private void ToggleVisibility()
     {
         if (IsVisible && WindowState != WindowState.Minimized)

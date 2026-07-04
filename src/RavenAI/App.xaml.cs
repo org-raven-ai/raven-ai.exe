@@ -23,6 +23,7 @@ public partial class App : Application
 
     private SecureSettingsStore _store = null!;
     private RavenAISettings _settings = null!;
+    private SingleInstanceGuard? _singleInstance;
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -33,6 +34,16 @@ public partial class App : Application
         Log.Init(logger);
         HookGlobalExceptionHandlers();
         Log.Info("raven_ai starting", "App");
+
+        // --- Single instance: if we're not the first, wake the running window and exit. ---
+        _singleInstance = new SingleInstanceGuard();
+        if (!_singleInstance.IsFirstInstance)
+        {
+            Log.Info("Another instance is already running — surfacing it and exiting.", "App");
+            _singleInstance.SignalExistingInstance();
+            Shutdown();
+            return;
+        }
 
         _store = new SecureSettingsStore();
         _settings = _store.Load();
@@ -89,6 +100,12 @@ public partial class App : Application
 
         var window = new MainWindow(mainVm, new ScreenCaptureProtectionService(),
                                     new GlobalHotkeyService(), capture);
+
+        // A later launch signals us on a thread-pool thread; marshal onto the UI thread to
+        // un-minimize, center, and foreground the existing window.
+        _singleInstance.ListenForActivation(() =>
+            window.Dispatcher.Invoke(window.SurfaceFromOtherInstance));
+
         window.Show();
     }
 
@@ -118,6 +135,7 @@ public partial class App : Application
     protected override void OnExit(ExitEventArgs e)
     {
         Log.Info("raven_ai exiting", "App");
+        _singleInstance?.Dispose();
         _http.Dispose();
         base.OnExit(e);
     }
