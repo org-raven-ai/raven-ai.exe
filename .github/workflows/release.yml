@@ -2,6 +2,7 @@ name: Release
 
 on:
   push:
+    branches: [ main ]
     tags: [ 'v*' ]
   workflow_dispatch:
     inputs:
@@ -24,12 +25,39 @@ jobs:
           # On a tag push this is the tag; on manual dispatch use the provided tag.
           ref: ${{ github.event.inputs.tag || github.ref_name }}
 
+      - name: Resolve release tag
+        id: resolve
+        shell: pwsh
+        # Tag pushes and manual dispatches always release their tag. Pushes to main
+        # release v<Version> from the csproj, but only if that tag doesn't exist yet —
+        # so bumping <Version> is what cuts a new release.
+        run: |
+          if ('${{ github.event_name }}' -eq 'workflow_dispatch') {
+            $tag = '${{ github.event.inputs.tag }}'
+            $release = 'true'
+          }
+          elseif ('${{ github.ref_type }}' -eq 'tag') {
+            $tag = '${{ github.ref_name }}'
+            $release = 'true'
+          }
+          else {
+            $version = (Select-Xml -Path src/RavenAI/RavenAI.csproj -XPath '//Version').Node.InnerText
+            $tag = "v$version"
+            $existing = git ls-remote --tags origin "refs/tags/$tag"
+            $release = if ($existing) { 'false' } else { 'true' }
+          }
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+          "release=$release" >> $env:GITHUB_OUTPUT
+          Write-Host "tag=$tag release=$release"
+
       - name: Setup .NET 8
+        if: steps.resolve.outputs.release == 'true'
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
 
       - name: Publish standalone single-file win-x64 exe
+        if: steps.resolve.outputs.release == 'true'
         # IncludeNativeLibrariesForSelfExtract is also set on the CLI (not only in the csproj)
         # so re-running this workflow against an older tag still embeds the WPF native DLLs
         # and yields one runnable exe.
@@ -41,18 +69,22 @@ jobs:
           -o publish
 
       - name: Stage release asset
+        if: steps.resolve.outputs.release == 'true'
         shell: pwsh
         run: |
-          $tag = "${{ github.event.inputs.tag || github.ref_name }}"
+          $tag = "${{ steps.resolve.outputs.tag }}"
           New-Item -ItemType Directory -Force dist | Out-Null
           Copy-Item publish/raven_ai.exe "dist/raven_ai-$tag-win-x64.exe"
           Get-ChildItem dist
 
       - name: Publish GitHub Release
+        if: steps.resolve.outputs.release == 'true'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
-          name: raven_ai ${{ github.event.inputs.tag || github.ref_name }}
+          tag_name: ${{ steps.resolve.outputs.tag }}
+          name: raven_ai ${{ steps.resolve.outputs.tag }}
+          # On a main push the tag doesn't exist yet; create it at the pushed commit.
+          target_commitish: ${{ github.sha }}
           generate_release_notes: true
           # Fail loudly if the asset is missing instead of publishing an empty release.
           fail_on_unmatched_files: true
