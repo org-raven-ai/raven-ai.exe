@@ -38,7 +38,11 @@ public sealed class AzureSpeechRecognizer : IDisposable
     public AzureSpeechRecognizer(Func<(string apiKey, string endpoint, string language)> configProvider)
         => _configProvider = configProvider;
 
-    public async Task StartAsync(AudioInputSource source)
+    /// <param name="microphoneDeviceId">
+    /// WASAPI endpoint ID of the microphone to listen to (see <see cref="MicrophoneEnumerator"/>).
+    /// Null/empty uses the system default device. Ignored when <paramref name="source"/> is system audio.
+    /// </param>
+    public async Task StartAsync(AudioInputSource source, string? microphoneDeviceId = null)
     {
         if (IsRunning) return;
 
@@ -63,7 +67,9 @@ public sealed class AzureSpeechRecognizer : IDisposable
         }
         else
         {
-            _audioConfig = AudioConfig.FromDefaultMicrophoneInput();
+            _audioConfig = string.IsNullOrEmpty(microphoneDeviceId)
+                ? AudioConfig.FromDefaultMicrophoneInput()
+                : AudioConfig.FromMicrophoneInput(microphoneDeviceId);
         }
 
         _recognizer = new SpeechRecognizer(speechConfig, _audioConfig);
