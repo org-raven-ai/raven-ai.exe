@@ -172,6 +172,35 @@
                     <CheckBox Content="Use Windows offline TTS (no network)" IsChecked="{Binding UseOfflineTTS}"
                               Foreground="{StaticResource TextBrush}" Margin="0,4,0,12" />
 
+                    <!-- ===== Azure Speech (speech-to-text) ===== -->
+                    <Border BorderBrush="{StaticResource PanelBg}" BorderThickness="0,1,0,0"
+                            Margin="0,4,0,12" Padding="0,12,0,0">
+                        <StackPanel>
+                            <TextBlock Text="Azure Speech (Speech-to-Text)" FontWeight="Bold"
+                                       Foreground="{StaticResource TextBrush}" Margin="0,0,0,8" />
+
+                            <TextBlock Text="Azure Speech Key" Foreground="{StaticResource SubtleTextBrush}" />
+                            <PasswordBox x:Name="AzureSpeechKeyBox" Margin="0,4,0,2" Padding="8,6"
+                                         Background="{StaticResource PanelBg}" Foreground="{StaticResource TextBrush}" />
+                            <TextBlock Foreground="{StaticResource SubtleTextBrush}" FontSize="11" Margin="0,0,0,8"
+                                       Text="Stored encrypted (DPAPI). Leave blank to keep the current key." />
+                            <TextBlock Text="✓ An Azure key is currently stored." Foreground="#7ED07E" FontSize="11" Margin="0,0,0,8"
+                                       Visibility="{Binding HasStoredAzureSpeechKey, Converter={StaticResource BoolToVisibility}}" />
+
+                            <TextBlock Text="Endpoint / Region" Foreground="{StaticResource SubtleTextBrush}" />
+                            <TextBox Text="{Binding AzureSpeechEndpoint}" Margin="0,4,0,2" />
+                            <TextBlock Foreground="{StaticResource SubtleTextBrush}" FontSize="11" Margin="0,0,0,8"
+                                       TextWrapping="Wrap"
+                                       Text="Full endpoint (e.g. https://eastus.api.cognitive.microsoft.com) or just a region (e.g. eastus)." />
+
+                            <TextBlock Text="Recognition Language" Foreground="{StaticResource SubtleTextBrush}" />
+                            <TextBox Text="{Binding AzureSpeechRecognitionLanguage}" Margin="0,4,0,8" />
+
+                            <Button Content="Clear Azure Key" Command="{Binding ClearAzureKeyCommand}"
+                                    Background="#555" HorizontalAlignment="Left" Padding="10,4" />
+                        </StackPanel>
+                    </Border>
+
                     <!-- ===== Window transparency ===== -->
                     <Grid Margin="0,0,0,12">
                         <Grid.ColumnDefinitions>

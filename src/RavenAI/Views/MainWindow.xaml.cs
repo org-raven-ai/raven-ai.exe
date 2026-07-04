@@ -253,10 +253,12 @@ public partial class MainWindow : Window
 
     private void SaveSettings_Click(object sender, RoutedEventArgs e)
     {
-        // PasswordBox intentionally does not expose Password via binding; pull it here.
+        // PasswordBox intentionally does not expose Password via binding; pull them here.
         _vm.Settings.APIKeyInput = APIKeyBox.Password;
+        _vm.Settings.AzureSpeechKeyInput = AzureSpeechKeyBox.Password;
         _vm.Settings.SaveCommand.Execute(null);
         APIKeyBox.Clear();
+        AzureSpeechKeyBox.Clear();
     }
 
     // ---- Shutdown -------------------------------------------------------------------------

@@ -17,8 +17,38 @@ namespace RavenAI.Services;
 /// </summary>
 public sealed class SecureSettingsStore
 {
-    // Extra entropy mixed into DPAPI so the blob is bound to this app, not just the user.
-    private static readonly byte[] Entropy = Encoding.UTF8.GetBytes("raven_ai.ApiKey.v1");
+    // Extra entropy mixed into DPAPI so each blob is bound to this app AND to the specific key
+    // slot — an OpenAI key blob can't be decrypted as an Azure Speech key blob and vice versa.
+    private static readonly byte[] ApiKeyEntropy = Encoding.UTF8.GetBytes("raven_ai.ApiKey.v1");
+    private static readonly byte[] AzureSpeechKeyEntropy = Encoding.UTF8.GetBytes("raven_ai.AzureSpeechKey.v1");
+
+    /// <summary>Encrypts plaintext with DPAPI and returns a base64 blob, scrubbing the plaintext. Null/empty → null.</summary>
+    private static string? Protect(string? plaintext, byte[] entropy)
+    {
+        if (string.IsNullOrEmpty(plaintext)) return null;
+        byte[] plainBytes = Encoding.UTF8.GetBytes(plaintext);
+        byte[] cipher = ProtectedData.Protect(plainBytes, entropy, DataProtectionScope.CurrentUser);
+        Array.Clear(plainBytes, 0, plainBytes.Length); // scrub plaintext from memory promptly
+        return Convert.ToBase64String(cipher);
+    }
+
+    /// <summary>Decrypts a base64 DPAPI blob; null if missing/unreadable. Scrubs the working bytes.</summary>
+    private static string? Unprotect(string? blob, byte[] entropy)
+    {
+        if (string.IsNullOrEmpty(blob)) return null;
+        try
+        {
+            byte[] cipher = Convert.FromBase64String(blob);
+            byte[] plain = ProtectedData.Unprotect(cipher, entropy, DataProtectionScope.CurrentUser);
+            string key = Encoding.UTF8.GetString(plain);
+            Array.Clear(plain, 0, plain.Length);
+            return key;
+        }
+        catch
+        {
+            return null;
+        }
+    }
 
     // PropertyNameCaseInsensitive lets settings files written before the abbreviation-casing
     // rename (e.g. "EncryptedApiKey", "BaseUrl") still bind to the renamed properties
@@ -65,37 +95,20 @@ public sealed class SecureSettingsStore
     /// object as a base64 blob. Pass null/empty to clear the stored key.
     /// </summary>
     public void SetAPIKey(RavenAISettings settings, string? plaintextKey)
-    {
-        if (string.IsNullOrEmpty(plaintextKey))
-        {
-            settings.EncryptedAPIKey = null;
-            return;
-        }
-
-        byte[] plainBytes = Encoding.UTF8.GetBytes(plaintextKey);
-        byte[] cipher = ProtectedData.Protect(plainBytes, Entropy, DataProtectionScope.CurrentUser);
-        Array.Clear(plainBytes, 0, plainBytes.Length); // scrub plaintext from memory promptly
-        settings.EncryptedAPIKey = Convert.ToBase64String(cipher);
-    }
+        => settings.EncryptedAPIKey = Protect(plaintextKey, ApiKeyEntropy);
 
     /// <summary>
     /// Decrypts and returns the plaintext API key, or null if none is stored / decryption fails.
     /// The returned string should be used immediately and not retained.
     /// </summary>
     public string? GetAPIKey(RavenAISettings settings)
-    {
-        if (string.IsNullOrEmpty(settings.EncryptedAPIKey)) return null;
-        try
-        {
-            byte[] cipher = Convert.FromBase64String(settings.EncryptedAPIKey);
-            byte[] plain = ProtectedData.Unprotect(cipher, Entropy, DataProtectionScope.CurrentUser);
-            string key = Encoding.UTF8.GetString(plain);
-            Array.Clear(plain, 0, plain.Length);
-            return key;
-        }
-        catch
-        {
-            return null;
-        }
-    }
+        => Unprotect(settings.EncryptedAPIKey, ApiKeyEntropy);
+
+    /// <summary>Stores the Azure Speech resource key (DPAPI). Pass null/empty to clear.</summary>
+    public void SetAzureSpeechKey(RavenAISettings settings, string? plaintextKey)
+        => settings.EncryptedAzureSpeechApiKey = Protect(plaintextKey, AzureSpeechKeyEntropy);
+
+    /// <summary>Decrypts the Azure Speech key, or null if none is stored / decryption fails.</summary>
+    public string? GetAzureSpeechKey(RavenAISettings settings)
+        => Unprotect(settings.EncryptedAzureSpeechApiKey, AzureSpeechKeyEntropy);
 }

@@ -29,6 +29,9 @@ public sealed partial class SettingsViewModel : ObservableObject
         _useOfflineTTS = settings.UseOfflineTTS;
         _windowOpacity = Math.Clamp(settings.WindowOpacityPercent, 30, 100);
         _hasStoredKey = !string.IsNullOrEmpty(settings.EncryptedAPIKey);
+        _azureSpeechEndpoint = settings.AzureSpeechEndpoint;
+        _azureSpeechRecognitionLanguage = settings.AzureSpeechRecognitionLanguage;
+        _hasStoredAzureSpeechKey = !string.IsNullOrEmpty(settings.EncryptedAzureSpeechApiKey);
     }
 
     // These are manual properties rather than [ObservableProperty] because the MVVM source
@@ -52,6 +55,13 @@ public sealed partial class SettingsViewModel : ObservableObject
     [ObservableProperty] private string _model;
     [ObservableProperty] private string _systemPrompt;
     [ObservableProperty] private bool _useOfflineTTS;
+
+    // Azure Speech (speech-to-text) — independent credential from the OpenAI key above.
+    [ObservableProperty] private bool _hasStoredAzureSpeechKey;
+    private string _azureSpeechKeyInput = string.Empty; // plaintext only while typing; cleared after Save
+    public string AzureSpeechKeyInput { get => _azureSpeechKeyInput; set => SetProperty(ref _azureSpeechKeyInput, value); }
+    [ObservableProperty] private string _azureSpeechEndpoint;
+    [ObservableProperty] private string _azureSpeechRecognitionLanguage;
 
     /// <summary>Whole-window opacity in percent (30–100). Applied live as the slider moves.</summary>
     [ObservableProperty] private int _windowOpacity;
@@ -77,6 +87,8 @@ public sealed partial class SettingsViewModel : ObservableObject
         _settings.SystemPrompt = SystemPrompt ?? string.Empty;
         _settings.UseOfflineTTS = UseOfflineTTS;
         _settings.WindowOpacityPercent = Math.Clamp(WindowOpacity, 30, 100);
+        _settings.AzureSpeechEndpoint = (AzureSpeechEndpoint ?? string.Empty).Trim();
+        _settings.AzureSpeechRecognitionLanguage = (AzureSpeechRecognitionLanguage ?? string.Empty).Trim();
 
         // Only overwrite the stored key if the user typed something new.
         if (!string.IsNullOrWhiteSpace(APIKeyInput))
@@ -85,9 +97,16 @@ public sealed partial class SettingsViewModel : ObservableObject
             HasStoredKey = true;
         }
 
+        if (!string.IsNullOrWhiteSpace(AzureSpeechKeyInput))
+        {
+            _store.SetAzureSpeechKey(_settings, AzureSpeechKeyInput.Trim());
+            HasStoredAzureSpeechKey = true;
+        }
+
         _store.Save(_settings);
 
         APIKeyInput = string.Empty; // never keep plaintext around
+        AzureSpeechKeyInput = string.Empty;
         StatusMessage = "Settings saved.";
         Saved?.Invoke();
     }
@@ -100,5 +119,15 @@ public sealed partial class SettingsViewModel : ObservableObject
         HasStoredKey = false;
         APIKeyInput = string.Empty;
         StatusMessage = "Stored API key cleared.";
+    }
+
+    [RelayCommand]
+    private void ClearAzureKey()
+    {
+        _store.SetAzureSpeechKey(_settings, null);
+        _store.Save(_settings);
+        HasStoredAzureSpeechKey = false;
+        AzureSpeechKeyInput = string.Empty;
+        StatusMessage = "Stored Azure Speech key cleared.";
     }
 }

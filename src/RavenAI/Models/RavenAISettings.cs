@@ -34,6 +34,22 @@ public sealed class RavenAISettings
     public bool UseOfflineTTS { get; set; }
 
     /// <summary>
+    /// DPAPI-protected (CurrentUser scope), base64-encoded Azure Speech resource key. Separate
+    /// from <see cref="EncryptedAPIKey"/> because Azure Speech is an independent credential.
+    /// Never plaintext; see <see cref="Services.SecureSettingsStore"/>.
+    /// </summary>
+    public string? EncryptedAzureSpeechApiKey { get; set; }
+
+    /// <summary>
+    /// Azure Speech endpoint URL (e.g. https://eastus.api.cognitive.microsoft.com) OR a bare
+    /// region name (e.g. eastus). The recognizer picks FromEndpoint vs FromSubscription accordingly.
+    /// </summary>
+    public string AzureSpeechEndpoint { get; set; } = string.Empty;
+
+    /// <summary>BCP-47 recognition language for Azure Speech, e.g. en-US.</summary>
+    public string AzureSpeechRecognitionLanguage { get; set; } = "en-US";
+
+    /// <summary>
     /// Whole-window opacity in percent (30–100), applied live via WPF Window.Opacity.
     /// Screen-capture exclusion still holds while translucent (verified at runtime; the
     /// protection watchdog and warning banner are the safety net).
