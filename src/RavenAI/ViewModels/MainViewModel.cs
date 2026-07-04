@@ -51,7 +51,11 @@ public sealed partial class MainViewModel : ObservableObject
 
     partial void OnIsProtectedChanged(bool value) => OnPropertyChanged(nameof(ShowProtectionWarning));
     partial void OnIsFullyHiddenChanged(bool value) => OnPropertyChanged(nameof(ShowProtectionWarning));
-    partial void OnIsSettingsOpenChanged(bool value) => OnPropertyChanged(nameof(IsChatOpen));
+    partial void OnIsSettingsOpenChanged(bool value)
+    {
+        OnPropertyChanged(nameof(IsChatOpen));
+        if (value) Settings.EnsureModelsLoaded(); // populate the model dropdowns on first open
+    }
     partial void OnIsSpeechOpenChanged(bool value) => OnPropertyChanged(nameof(IsChatOpen));
     partial void OnIsLogOpenChanged(bool value) => OnPropertyChanged(nameof(IsChatOpen));
 

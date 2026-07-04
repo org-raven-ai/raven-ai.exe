@@ -1,7 +1,10 @@
+using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using RavenAI.Models;
 using RavenAI.Services;
+using RavenAI.Services.Chat;
+using RavenAI.Services.Logging;
 
 namespace RavenAI.ViewModels;
 
@@ -14,11 +17,13 @@ public sealed partial class SettingsViewModel : ObservableObject
 {
     private readonly SecureSettingsStore _store;
     private readonly RavenAISettings _settings;
+    private readonly OpenAIModelCatalog _modelCatalog;
 
-    public SettingsViewModel(SecureSettingsStore store, RavenAISettings settings)
+    public SettingsViewModel(SecureSettingsStore store, RavenAISettings settings, OpenAIModelCatalog modelCatalog)
     {
         _store = store;
         _settings = settings;
+        _modelCatalog = modelCatalog;
 
         _baseURL = settings.BaseURL;
         _model = settings.Model;
@@ -68,6 +73,15 @@ public sealed partial class SettingsViewModel : ObservableObject
 
     [ObservableProperty] private string _statusMessage = string.Empty;
 
+    /// <summary>
+    /// Model ids fetched from the provider's /models endpoint. Shared by the Chat / STT / TTS
+    /// model dropdowns; the fields stay editable so a custom id can still be typed.
+    /// </summary>
+    public ObservableCollection<string> AvailableModels { get; } = new();
+
+    /// <summary>True while a /models fetch is in flight (drives the "Loading…" status).</summary>
+    [ObservableProperty] private bool _isLoadingModels;
+
     /// <summary>Raised after a successful save so the shell can hide the settings pane.</summary>
     public event Action? Saved;
 
@@ -109,6 +123,48 @@ public sealed partial class SettingsViewModel : ObservableObject
         AzureSpeechKeyInput = string.Empty;
         StatusMessage = "Settings saved.";
         Saved?.Invoke();
+    }
+
+    /// <summary>
+    /// Fetches the provider's model list into <see cref="AvailableModels"/>. Uses the currently
+    /// stored key (typing a new key in the box requires a Save first). Failures are surfaced in
+    /// the status line and logged rather than thrown.
+    /// </summary>
+    [RelayCommand]
+    private async Task RefreshModelsAsync()
+    {
+        IsLoadingModels = true;
+        StatusMessage = "Loading models…";
+        try
+        {
+            IReadOnlyList<string> models = await _modelCatalog.ListModelsAsync();
+            AvailableModels.Clear();
+            foreach (string m in models)
+                AvailableModels.Add(m);
+            StatusMessage = models.Count > 0
+                ? $"Loaded {models.Count} models."
+                : "The provider returned no models.";
+        }
+        catch (Exception ex)
+        {
+            Log.Warning("Failed to list models from the provider", ex, "Settings");
+            StatusMessage = $"Could not load models: {ex.Message}";
+        }
+        finally
+        {
+            IsLoadingModels = false;
+        }
+    }
+
+    /// <summary>
+    /// Populates the model dropdowns the first time the Settings pane is shown, provided a key is
+    /// stored and nothing has been loaded yet. No-op otherwise, so opening Settings offline (or a
+    /// second time) stays instant and never blocks on the network.
+    /// </summary>
+    public void EnsureModelsLoaded()
+    {
+        if (AvailableModels.Count == 0 && HasStoredKey && !IsLoadingModels)
+            RefreshModelsCommand.Execute(null);
     }
 
     [RelayCommand]
