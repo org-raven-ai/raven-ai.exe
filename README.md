@@ -19,10 +19,18 @@ screen shares, using the same OS mechanism (`SetWindowDisplayAffinity` with
   API, applied after the HWND exists, **verified** with `GetWindowDisplayAffinity`, and
   re-applied by a watchdog. Failures are surfaced loudly in a warning banner — you never
   *think* you're protected when you aren't.
-- **Always-on-top, frameless, draggable** compact window; minimizes to a system-tray icon.
+- **Full-screen transparent overlay.** The window spans the whole virtual desktop and is
+  **click-through at all times** — every click and keystroke falls through to the app underneath.
+  The assistant UI lives in an always-on-top floating card you can reposition.
+- **Interactive mode** (`Ctrl+Shift+I`). Enter it to work the assistant *without* giving the
+  overlay OS focus: a global low-level mouse hook (`WH_MOUSE_LL`) **swallows all mouse input** and
+  **freezes the real pointer** (`ClipCursor`), while the app paints its own **fake cursor** driven
+  by raw-input deltas and does its own hit-testing — click buttons, focus/type the chat box, drag
+  the card, and scroll. `Esc` or `Ctrl+Shift+I` again exits and returns focus to the previous app.
 - **Global hotkeys** (work even when unfocused):
-  - `Ctrl+Shift+Space` — show / hide the window
+  - `Ctrl+Shift+Space` — show / hide the overlay
   - `Ctrl+Shift+V` — push-to-talk (start/stop voice)
+  - `Ctrl+Shift+I` — toggle interactive mode (capture the mouse / release it)
 - **Streaming chat** against any **OpenAI-compatible** `/chat/completions` endpoint
   (configurable base URL + model), rendered token-by-token via SSE.
 - **Voice**: push-to-talk mic capture (NAudio, 16 kHz mono WAV) → transcription
@@ -121,15 +129,17 @@ raven_ai.sln
 src/RavenAI/
   App.xaml(.cs)              composition root (manual wiring, no DI container)
   app.manifest              per-monitor DPI aware; Win10/11 supported OS
-  Views/                    MainWindow (opaque, no AllowsTransparency), converters
+  Views/                    MainWindow (full-screen transparent click-through overlay), converters
   ViewModels/               MainViewModel, ChatViewModel, SettingsViewModel (MVVM)
   Services/
     ScreenCaptureProtectionService.cs   the core capture-exclusion logic
     GlobalHotkeyService.cs              RegisterHotKey + WM_HOTKEY hook
+    Overlay/InteractiveModeController.cs mouse-hook + raw-input capture for interactive mode
     SecureSettingsStore.cs             DPAPI-encrypted settings persistence
     Chat/IChatProvider.cs + OpenAIChatProvider.cs   SSE streaming chat
     Voice/                 STT/TTS abstractions, NAudio capture, offline TTS
-  Native/                   P/Invoke (SetWindowDisplayAffinity, RegisterHotKey)
+  Native/                   P/Invoke (display affinity, hotkeys, click-through, mouse hook,
+                            raw input, cursor freeze)
   Models/                   RavenAISettings, ChatMessage
 ```
 
@@ -145,6 +155,17 @@ src/RavenAI/
   **GPU framebuffer** on the same machine can still see the window. Do not rely on it to hide
   content from a compromised host.
 - Windows builds **below 19041** get the `WDA_MONITOR` black-box fallback, not true invisibility.
+
+### Interactive mode
+
+- The frozen real cursor is **pinned but stays faintly visible** where you left it (we avoid the
+  crash-unsafe route of hiding the system cursor globally).
+- **ComboBox dropdowns** can't be opened/picked with the fake cursor (the popup is a separate
+  visual); editable model boxes still accept typed text.
+- Like any `WH_MOUSE_LL` hook, it **won't intercept over elevated windows** unless raven_ai itself
+  runs elevated (UIPI), and never on the secure desktop (UAC / lock screen).
+- Apps that read **raw input exclusively** (some full-screen games) still receive movement even
+  while legacy input is swallowed.
 
 ---
 
