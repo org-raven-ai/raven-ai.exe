@@ -30,3 +30,5 @@ $RECYCLE.BIN/
 # The app writes to %APPDATA%\raven_ai, which is outside the repo, but guard anyway:
 settings.json
 *.settings.local.json
+
+/tmp
