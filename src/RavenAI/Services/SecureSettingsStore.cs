@@ -21,6 +21,7 @@ public sealed class SecureSettingsStore
     // slot — an OpenAI key blob can't be decrypted as an Azure Speech key blob and vice versa.
     private static readonly byte[] ApiKeyEntropy = Encoding.UTF8.GetBytes("raven_ai.ApiKey.v1");
     private static readonly byte[] AzureSpeechKeyEntropy = Encoding.UTF8.GetBytes("raven_ai.AzureSpeechKey.v1");
+    private static readonly byte[] WebSearchKeyEntropy = Encoding.UTF8.GetBytes("raven_ai.WebSearchKey.v1");
 
     /// <summary>Encrypts plaintext with DPAPI and returns a base64 blob, scrubbing the plaintext. Null/empty → null.</summary>
     private static string? Protect(string? plaintext, byte[] entropy)
@@ -111,4 +112,12 @@ public sealed class SecureSettingsStore
     /// <summary>Decrypts the Azure Speech key, or null if none is stored / decryption fails.</summary>
     public string? GetAzureSpeechKey(RavenAISettings settings)
         => Unprotect(settings.EncryptedAzureSpeechApiKey, AzureSpeechKeyEntropy);
+
+    /// <summary>Stores the Tavily web-search key (DPAPI). Pass null/empty to clear.</summary>
+    public void SetWebSearchKey(RavenAISettings settings, string? plaintextKey)
+        => settings.EncryptedWebSearchApiKey = Protect(plaintextKey, WebSearchKeyEntropy);
+
+    /// <summary>Decrypts the web-search key, or null if none is stored / decryption fails.</summary>
+    public string? GetWebSearchKey(RavenAISettings settings)
+        => Unprotect(settings.EncryptedWebSearchApiKey, WebSearchKeyEntropy);
 }
