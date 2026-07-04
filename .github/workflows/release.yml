@@ -1,0 +1,51 @@
+name: Release
+
+on:
+  push:
+    tags: [ 'v*' ]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to build and release (e.g. v1.0.0)'
+        required: true
+
+# Needed for the release step to create a GitHub Release and upload assets.
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # On a tag push this is the tag; on manual dispatch use the provided tag.
+          ref: ${{ github.event.inputs.tag || github.ref_name }}
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Publish self-contained win-x64
+        run: >
+          dotnet publish src/RavenAI/RavenAI.csproj
+          -c Release -r win-x64
+          -p:PublishSelfContained=true
+          -o publish
+
+      - name: Package release zip
+        shell: pwsh
+        run: |
+          $tag = "${{ github.event.inputs.tag || github.ref_name }}"
+          Compress-Archive -Path publish/* -DestinationPath "raven_ai-$tag-win-x64.zip" -Force
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          name: raven_ai ${{ github.event.inputs.tag || github.ref_name }}
+          generate_release_notes: true
+          files: raven_ai-*-win-x64.zip
