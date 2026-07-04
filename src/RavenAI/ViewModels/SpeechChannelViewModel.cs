@@ -4,6 +4,7 @@ using System.Text;
 using System.Windows.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using RavenAI.Services.Logging;
 using RavenAI.Services.Voice;
 
 namespace RavenAI.ViewModels;
@@ -88,13 +89,13 @@ public sealed partial class SpeechChannelViewModel : ObservableObject, IDisposab
         {
             Status = "Stopping…";
             try { await _recognizer.StopAsync(); }
-            catch (Exception ex) { Status = $"Error: {ex.Message}"; }
+            catch (Exception ex) { Status = $"Error: {ex.Message}"; Log.Error($"[{Title}] Failed to stop recognizer", ex, "Speech"); }
             return;
         }
 
         Status = "Starting…";
         try { await _recognizer.StartAsync(_source, SelectedMicrophone?.Id); }
-        catch (Exception ex) { Status = $"Error: {ex.Message}"; }
+        catch (Exception ex) { Status = $"Error: {ex.Message}"; Log.Error($"[{Title}] Failed to start recognizer", ex, "Speech"); }
     }
 
     [RelayCommand]
@@ -116,7 +117,11 @@ public sealed partial class SpeechChannelViewModel : ObservableObject, IDisposab
         FinalTranscript = _final.ToString();
     });
 
-    private void OnError(string message) => _dispatcher.Invoke(() => Status = $"Error: {message}");
+    private void OnError(string message)
+    {
+        Log.Error($"[{Title}] Recognizer error: {message}", null, "Speech");
+        _dispatcher.Invoke(() => Status = $"Error: {message}");
+    }
 
     private void OnStarted() => _dispatcher.Invoke(() =>
     {

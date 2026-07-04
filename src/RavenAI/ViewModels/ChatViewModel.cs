@@ -4,6 +4,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using RavenAI.Models;
 using RavenAI.Services.Chat;
+using RavenAI.Services.Logging;
 using RavenAI.Services.Voice;
 
 namespace RavenAI.ViewModels;
@@ -91,6 +92,7 @@ public sealed partial class ChatViewModel : ObservableObject
         {
             ErrorMessage = ex.Message;
             assistant.Content = sb.Length > 0 ? sb.ToString() : "(error)";
+            Log.Error("Chat request failed", ex, "Chat");
         }
         finally
         {
@@ -112,6 +114,7 @@ public sealed partial class ChatViewModel : ObservableObject
         catch (Exception ex)
         {
             ErrorMessage = $"TTS error: {ex.Message}";
+            Log.Error("Text-to-speech failed", ex, "Voice");
         }
     }
 
@@ -144,6 +147,7 @@ public sealed partial class ChatViewModel : ObservableObject
             catch (Exception ex)
             {
                 ErrorMessage = $"Microphone error: {ex.Message}";
+                Log.Error("Microphone capture failed to start", ex, "Voice");
             }
             return;
         }
@@ -164,6 +168,7 @@ public sealed partial class ChatViewModel : ObservableObject
         catch (Exception ex)
         {
             ErrorMessage = $"Transcription error: {ex.Message}";
+            Log.Error("Voice transcription failed", ex, "Voice");
         }
         finally
         {
