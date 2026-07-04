@@ -1,0 +1,32 @@
+# ---- .NET build output ----
+bin/
+obj/
+[Dd]ebug/
+[Rr]elease/
+*.user
+*.suo
+*.userosscache
+*.dll
+*.exe
+*.pdb
+
+# ---- Publish output ----
+publish/
+[Pp]ublish/
+*.app.publish/
+
+# ---- Rider / VS / VS Code ----
+.vs/
+.idea/
+.vscode/
+*.sln.docstates
+
+# ---- OS junk ----
+Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# ---- App runtime data (NEVER commit — contains the DPAPI-encrypted key blob) ----
+# The app writes to %APPDATA%\raven_ai, which is outside the repo, but guard anyway:
+settings.json
+*.settings.local.json
