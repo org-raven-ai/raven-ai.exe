@@ -1,20 +1,24 @@
 using Microsoft.CognitiveServices.Speech;
 using Microsoft.CognitiveServices.Speech.Audio;
+using NAudio.CoreAudioApi;
+using NAudio.Wave;
 
 namespace RavenAI.Services.Voice;
 
 /// <summary>
 /// Continuous, real-time speech-to-text via the Azure Cognitive Services Speech SDK. Unlike the
 /// batch <see cref="ISpeechToText"/> (which transcribes a finished WAV clip), this streams audio
-/// live and raises interim + final results as you speak. Supports the default microphone or
-/// system loopback audio (see <see cref="LoopbackAudioPusher"/>).
+/// live and raises interim + final results as you speak. Both the microphone and system audio are
+/// captured with NAudio and pushed through the SDK (see <see cref="WasapiAudioPusher"/>); the
+/// microphone deliberately avoids the SDK's built-in <c>FromMicrophoneInput</c>, whose slow native
+/// device init delays the first transcript by several seconds.
 /// </summary>
 public sealed class AzureSpeechRecognizer : IDisposable
 {
     private readonly Func<(string apiKey, string endpoint, string language)> _configProvider;
 
     private SpeechRecognizer? _recognizer;
-    private LoopbackAudioPusher? _loopback;
+    private WasapiAudioPusher? _pusher;
     private AudioConfig? _audioConfig;
     private TaskCompletionSource<bool>? _stoppedTcs;
 
@@ -59,18 +63,14 @@ public sealed class AzureSpeechRecognizer : IDisposable
         speechConfig.SpeechRecognitionLanguage =
             string.IsNullOrWhiteSpace(language) ? "en-US" : language.Trim();
 
-        // The microphone uses the SDK's own capture; system audio is captured + pushed by NAudio.
-        if (source == AudioInputSource.SystemAudio)
-        {
-            _loopback = new LoopbackAudioPusher();
-            _audioConfig = _loopback.CreateAudioConfig();
-        }
-        else
-        {
-            _audioConfig = string.IsNullOrEmpty(microphoneDeviceId)
-                ? AudioConfig.FromDefaultMicrophoneInput()
-                : AudioConfig.FromMicrophoneInput(microphoneDeviceId);
-        }
+        // Both sources are captured with NAudio and pushed through the SDK. Using our own capture
+        // for the microphone (rather than the SDK's FromMicrophoneInput) sidesteps the SDK's slow
+        // native device init, so recognition starts within a fraction of a second.
+        IWaveIn capture = source == AudioInputSource.SystemAudio
+            ? new WasapiLoopbackCapture()
+            : CreateMicrophoneCapture(microphoneDeviceId);
+        _pusher = new WasapiAudioPusher(capture);
+        _audioConfig = _pusher.CreateAudioConfig();
 
         _recognizer = new SpeechRecognizer(speechConfig, _audioConfig);
         _stoppedTcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -97,9 +97,22 @@ public sealed class AzureSpeechRecognizer : IDisposable
         _recognizer.SessionStopped += (_, _) => _stoppedTcs?.TrySetResult(true);
 
         await _recognizer.StartContinuousRecognitionAsync();
-        _loopback?.Start();
+        _pusher.Start();
         IsRunning = true;
         Started?.Invoke();
+    }
+
+    // Builds a WASAPI capture for the chosen microphone; falls back to the system default device
+    // when no specific endpoint is selected. Device IDs are WASAPI endpoint IDs (see
+    // <see cref="MicrophoneEnumerator"/>), which MMDeviceEnumerator.GetDevice takes directly.
+    private static WasapiCapture CreateMicrophoneCapture(string? microphoneDeviceId)
+    {
+        if (string.IsNullOrEmpty(microphoneDeviceId))
+            return new WasapiCapture();
+
+        using var enumerator = new MMDeviceEnumerator();
+        var device = enumerator.GetDevice(microphoneDeviceId);
+        return new WasapiCapture(device);
     }
 
     public async Task StopAsync()
@@ -107,11 +120,11 @@ public sealed class AzureSpeechRecognizer : IDisposable
         if (!IsRunning) return;
         IsRunning = false;
 
-        // Producer first: the loopback pusher drains, joins its pump thread, and closes the push
-        // stream (EOF) BEFORE the recognizer is stopped — reversing this can hang the SDK's pump
-        // on a stream that will never produce. Dispose() does Stop() then frees native resources.
-        _loopback?.Dispose();
-        _loopback = null;
+        // Producer first: the pusher drains, joins its pump thread, and closes the push stream
+        // (EOF) BEFORE the recognizer is stopped — reversing this can hang the SDK's pump on a
+        // stream that will never produce. Dispose() does Stop() then frees native resources.
+        _pusher?.Dispose();
+        _pusher = null;
 
         if (_recognizer is not null)
         {
@@ -139,7 +152,7 @@ public sealed class AzureSpeechRecognizer : IDisposable
         {
             _recognizer?.Dispose();
             _audioConfig?.Dispose();
-            _loopback?.Dispose();
+            _pusher?.Dispose();
         }
     }
 }
