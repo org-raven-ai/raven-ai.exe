@@ -56,6 +56,7 @@ public partial class MainWindow : Window
         base.OnSourceInitialized(e);
         IntPtr hwnd = new WindowInteropHelper(this).Handle;
 
+        HideFromTaskManagerApps(hwnd);
         ApplyCaptureProtection(hwnd);
         SetupHotkeys(hwnd);
         StartProtectionWatchdog(hwnd);
@@ -63,6 +64,36 @@ public partial class MainWindow : Window
         // Apply any saved transparency and keep it live as the settings slider moves.
         _vm.Settings.WindowOpacityChanged += OnWindowOpacityChanged;
         ApplyWindowOpacity(_vm.Settings.WindowOpacity);
+    }
+
+    // ---- Shell invisibility ---------------------------------------------------------------
+
+    private Window? _hiddenOwner;
+
+    /// <summary>
+    /// Keeps the overlay out of Task Manager's "Apps" group (it stays listed under
+    /// Background processes, like any process — that's OS-level and unavoidable).
+    /// Task Manager promotes a process to "Apps" when it has a visible, unowned,
+    /// non-tool top-level window, so we give this window a hidden owner and the
+    /// WS_EX_TOOLWINDOW style. Must run before the window is first rendered.
+    /// </summary>
+    private void HideFromTaskManagerApps(IntPtr hwnd)
+    {
+        _hiddenOwner = new Window
+        {
+            Width = 0,
+            Height = 0,
+            WindowStyle = WindowStyle.None,
+            ShowInTaskbar = false,
+            ShowActivated = false,
+            Visibility = Visibility.Hidden,
+        };
+        // EnsureHandle creates the HWND without ever showing the owner. Set the native
+        // owner directly (WPF's Window.Owner requires the owner to have been shown).
+        IntPtr ownerHwnd = new WindowInteropHelper(_hiddenOwner).EnsureHandle();
+        new WindowInteropHelper(this).Owner = ownerHwnd;
+
+        Native.NativeWindowStyle.MakeToolWindow(hwnd);
     }
 
     // ---- Window transparency --------------------------------------------------------------
@@ -237,6 +268,7 @@ public partial class MainWindow : Window
         _protectionWatchdog?.Stop();
         _hotkeys.Dispose();
         _capture.Dispose();
+        _hiddenOwner?.Close();
         base.OnClosing(e);
         Application.Current.Shutdown();
     }
