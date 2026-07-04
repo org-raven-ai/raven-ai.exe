@@ -51,19 +51,19 @@ screen shares, using the same OS mechanism (`SetWindowDisplayAffinity` with
 ```powershell
 # from the repo root
 dotnet build -c Release
-dotnet run --project src\RavenAi\RavenAi.csproj
+dotnet run --project src\RavenAI\RavenAI.csproj
 ```
 
 The executable is produced at:
 
 ```
-src\RavenAi\bin\Release\net8.0-windows\raven_ai.exe
+src\RavenAI\bin\Release\net8.0-windows\raven_ai.exe
 ```
 
 ### Small self-contained publish (single file, win-x64)
 
 ```powershell
-dotnet publish src\RavenAi\RavenAi.csproj -c Release -r win-x64 -p:PublishSelfContained=true
+dotnet publish src\RavenAI\RavenAI.csproj -c Release -r win-x64 -p:PublishSelfContained=true
 ```
 
 > **Antivirus note.** Because raven_ai combines screen-capture exclusion, global hotkeys, and
@@ -118,7 +118,7 @@ never the plaintext.
 
 ```
 raven_ai.sln
-src/RavenAi/
+src/RavenAI/
   App.xaml(.cs)              composition root (manual wiring, no DI container)
   app.manifest              per-monitor DPI aware; Win10/11 supported OS
   Views/                    MainWindow (opaque, no AllowsTransparency), converters
@@ -127,10 +127,10 @@ src/RavenAi/
     ScreenCaptureProtectionService.cs   the core capture-exclusion logic
     GlobalHotkeyService.cs              RegisterHotKey + WM_HOTKEY hook
     SecureSettingsStore.cs             DPAPI-encrypted settings persistence
-    Chat/IChatProvider.cs + OpenAiChatProvider.cs   SSE streaming chat
+    Chat/IChatProvider.cs + OpenAIChatProvider.cs   SSE streaming chat
     Voice/                 STT/TTS abstractions, NAudio capture, offline TTS
   Native/                   P/Invoke (SetWindowDisplayAffinity, RegisterHotKey)
-  Models/                   RavenAiSettings, ChatMessage
+  Models/                   RavenAISettings, ChatMessage
 ```
 
 ---
