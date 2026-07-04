@@ -1,32 +1,44 @@
-using System.IO;
-using System.Net.Http;
-using System.Net.Http.Headers;
+using System.ClientModel;
 using System.Runtime.CompilerServices;
 using System.Text;
-using System.Text.Json;
-using RavenAI.Models;
+using OpenAI;
+using OpenAI.Chat;
+using RavenAI.Services.Chat.Tools;
+using ChatMessage = RavenAI.Models.ChatMessage;
+using ChatRole = RavenAI.Models.ChatRole;
 
 namespace RavenAI.Services.Chat;
 
 /// <summary>
-/// Streaming chat against any OpenAI-compatible /chat/completions endpoint (configurable
-/// base URL + model). Uses Server-Sent Events (stream=true) so tokens arrive incrementally.
+/// Streaming chat against any OpenAI-compatible /chat/completions endpoint, built on the official
+/// OpenAI .NET SDK (<see cref="ChatClient"/>). A configurable base URL keeps this working against
+/// OpenAI, Azure, Ollama, LM Studio, OpenRouter, etc.
+///
+/// When a <see cref="ChatToolRegistry"/> is supplied, the model can call tools: this runs the
+/// agentic loop (stream → if the model requested tool calls, execute them and feed the results
+/// back → stream again) until the model produces a final answer. The public contract is unchanged —
+/// callers still receive a stream of assistant text deltas; tool call/result messages live only for
+/// the duration of the request and are not surfaced to the UI (they're logged for visibility).
 /// </summary>
 public sealed class OpenAIChatProvider : IChatProvider
 {
-    private readonly HttpClient _http;
+    /// <summary>Safety cap so a misbehaving model can't loop on tool calls forever.</summary>
+    private const int MaxToolRounds = 6;
+
     private readonly Func<(string apiKey, string baseURL, string model, string systemPrompt)> _configProvider;
+    private readonly ChatToolRegistry? _tools;
 
     /// <param name="configProvider">
     /// Called at request time so the freshest key/model are used. The key lives only for the
     /// duration of the call and is never stored on this object.
     /// </param>
+    /// <param name="tools">Optional tool registry. When present, the model may call these tools.</param>
     public OpenAIChatProvider(
-        HttpClient http,
-        Func<(string apiKey, string baseURL, string model, string systemPrompt)> configProvider)
+        Func<(string apiKey, string baseURL, string model, string systemPrompt)> configProvider,
+        ChatToolRegistry? tools = null)
     {
-        _http = http;
         _configProvider = configProvider;
+        _tools = tools;
     }
 
     public async IAsyncEnumerable<string> StreamAsync(
@@ -38,103 +50,144 @@ public sealed class OpenAIChatProvider : IChatProvider
         if (string.IsNullOrWhiteSpace(apiKey))
             throw new InvalidOperationException("No API key configured. Open Settings and paste your key.");
 
-        string url = $"{baseURL.TrimEnd('/')}/chat/completions";
+        ChatClient client = CreateClient(apiKey, baseURL, model);
 
-        // Build the request body. A system prompt (if any) is prepended.
-        var messages = new List<object>();
+        // Translate the app's conversation into SDK messages. This list also accumulates the
+        // assistant/tool messages produced across tool-call rounds within this single request.
+        var messages = new List<OpenAI.Chat.ChatMessage>();
         if (!string.IsNullOrWhiteSpace(systemPrompt))
-            messages.Add(new { role = "system", content = systemPrompt });
-        foreach (var m in conversation)
+            messages.Add(new SystemChatMessage(systemPrompt));
+        foreach (ChatMessage m in conversation)
         {
-            string role = m.Role switch
+            messages.Add(m.Role switch
             {
-                ChatRole.User => "user",
-                ChatRole.Assistant => "assistant",
-                _ => "system",
-            };
-            messages.Add(new { role, content = m.Content });
+                ChatRole.User => new UserChatMessage(m.Content),
+                ChatRole.Assistant => new AssistantChatMessage(m.Content),
+                _ => new SystemChatMessage(m.Content),
+            });
         }
 
-        var payload = new { model, messages, stream = true };
-        string bodyJson = JsonSerializer.Serialize(payload);
-
-        using var request = new HttpRequestMessage(HttpMethod.Post, url);
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
-        request.Content = new StringContent(bodyJson, Encoding.UTF8, "application/json");
-
-        using HttpResponseMessage response = await _http.SendAsync(
-            request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
-
-        if (!response.IsSuccessStatusCode)
+        bool hasTools = _tools is { HasTools: true };
+        var options = new ChatCompletionOptions();
+        if (hasTools)
         {
-            string err = await SafeReadError(response, cancellationToken);
-            throw new HttpRequestException(
-                $"Chat request failed ({(int)response.StatusCode} {response.ReasonPhrase}): {err}");
+            foreach (ChatTool tool in _tools!.ToChatTools())
+                options.Tools.Add(tool);
         }
 
-        await using Stream stream = await response.Content.ReadAsStreamAsync(cancellationToken);
-        using var reader = new StreamReader(stream);
-
-        // Parse the SSE stream. Each event line looks like: "data: {json}" or "data: [DONE]".
-        while (!reader.EndOfStream)
+        int round = 0;
+        bool requiresAction;
+        do
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            string? line = await reader.ReadLineAsync(cancellationToken);
-            if (string.IsNullOrEmpty(line)) continue;
-            if (!line.StartsWith("data:", StringComparison.Ordinal)) continue;
+            requiresAction = false;
+            var contentBuilder = new StringBuilder();
+            var toolCalls = new ToolCallAccumulator();
+            ChatFinishReason? finishReason = null;
 
-            string data = line["data:".Length..].Trim();
-            if (data == "[DONE]") yield break;
+            AsyncCollectionResult<StreamingChatCompletionUpdate> updates =
+                client.CompleteChatStreamingAsync(messages, options, cancellationToken);
 
-            string? delta = ExtractDelta(data);
-            if (!string.IsNullOrEmpty(delta))
-                yield return delta;
-        }
-    }
-
-    /// <summary>Pulls choices[0].delta.content out of one SSE JSON chunk, tolerating partial data.</summary>
-    private static string? ExtractDelta(string json)
-    {
-        try
-        {
-            using JsonDocument doc = JsonDocument.Parse(json);
-            if (!doc.RootElement.TryGetProperty("choices", out JsonElement choices) ||
-                choices.GetArrayLength() == 0)
-                return null;
-
-            JsonElement choice = choices[0];
-            if (choice.TryGetProperty("delta", out JsonElement delta) &&
-                delta.TryGetProperty("content", out JsonElement content) &&
-                content.ValueKind == JsonValueKind.String)
-                return content.GetString();
-
-            return null;
-        }
-        catch (JsonException)
-        {
-            return null; // ignore keep-alive / malformed partial chunks
-        }
-    }
-
-    private static async Task<string> SafeReadError(HttpResponseMessage response, CancellationToken ct)
-    {
-        try
-        {
-            string raw = await response.Content.ReadAsStringAsync(ct);
-            // Try to surface the provider's error.message if present.
-            try
+            await foreach (StreamingChatCompletionUpdate update in updates.WithCancellation(cancellationToken))
             {
-                using JsonDocument doc = JsonDocument.Parse(raw);
-                if (doc.RootElement.TryGetProperty("error", out JsonElement e) &&
-                    e.TryGetProperty("message", out JsonElement m))
-                    return m.GetString() ?? raw;
+                foreach (ChatMessageContentPart part in update.ContentUpdate)
+                {
+                    if (!string.IsNullOrEmpty(part.Text))
+                    {
+                        contentBuilder.Append(part.Text);
+                        yield return part.Text;
+                    }
+                }
+
+                foreach (StreamingChatToolCallUpdate toolCallUpdate in update.ToolCallUpdates)
+                    toolCalls.Append(toolCallUpdate);
+
+                if (update.FinishReason is not null)
+                    finishReason = update.FinishReason;
             }
-            catch (JsonException) { /* not JSON */ }
-            return string.IsNullOrWhiteSpace(raw) ? "(no response body)" : raw;
+
+            if (hasTools && finishReason == ChatFinishReason.ToolCalls)
+            {
+                IReadOnlyList<ChatToolCall> calls = toolCalls.Build();
+                if (calls.Count == 0)
+                    break; // nothing actionable; avoid an empty follow-up round
+
+                // Record the assistant turn (its tool calls, plus any text it emitted first).
+                var assistantMessage = new AssistantChatMessage(calls);
+                if (contentBuilder.Length > 0)
+                    assistantMessage.Content.Add(ChatMessageContentPart.CreateTextPart(contentBuilder.ToString()));
+                messages.Add(assistantMessage);
+
+                // Execute each tool and append its result as a tool message.
+                foreach (ChatToolCall call in calls)
+                {
+                    string argsJson = call.FunctionArguments is { } args ? args.ToString() : "{}";
+                    string result = await _tools!.InvokeAsync(call.FunctionName, argsJson, cancellationToken);
+                    messages.Add(new ToolChatMessage(call.Id, result));
+                }
+
+                requiresAction = true;
+            }
         }
-        catch
+        while (requiresAction && ++round < MaxToolRounds);
+    }
+
+    private static ChatClient CreateClient(string apiKey, string baseURL, string model)
+    {
+        var options = new OpenAIClientOptions
         {
-            return "(could not read error body)";
+            // Match the previous HttpClient timeout so long streaming replies aren't cut off.
+            NetworkTimeout = TimeSpan.FromMinutes(5),
+        };
+        if (!string.IsNullOrWhiteSpace(baseURL))
+            options.Endpoint = new Uri(baseURL);
+
+        return new ChatClient(model, new ApiKeyCredential(apiKey), options);
+    }
+
+    /// <summary>
+    /// Reassembles streamed tool-call deltas into complete <see cref="ChatToolCall"/>s. Each delta
+    /// carries an index; the id and function name arrive on the first delta for that index, and the
+    /// JSON arguments arrive as fragments to be concatenated.
+    /// </summary>
+    private sealed class ToolCallAccumulator
+    {
+        private readonly Dictionary<int, Entry> _byIndex = new();
+
+        private sealed class Entry
+        {
+            public string? Id;
+            public string? Name;
+            public readonly StringBuilder Arguments = new();
+        }
+
+        public void Append(StreamingChatToolCallUpdate update)
+        {
+            if (!_byIndex.TryGetValue(update.Index, out Entry? entry))
+            {
+                entry = new Entry();
+                _byIndex[update.Index] = entry;
+            }
+
+            if (!string.IsNullOrEmpty(update.ToolCallId))
+                entry.Id = update.ToolCallId;
+            if (!string.IsNullOrEmpty(update.FunctionName))
+                entry.Name = update.FunctionName;
+            if (update.FunctionArgumentsUpdate is { } fragment)
+                entry.Arguments.Append(fragment.ToString());
+        }
+
+        public IReadOnlyList<ChatToolCall> Build()
+        {
+            var calls = new List<ChatToolCall>(_byIndex.Count);
+            foreach (KeyValuePair<int, Entry> kvp in _byIndex.OrderBy(k => k.Key))
+            {
+                Entry e = kvp.Value;
+                if (string.IsNullOrEmpty(e.Id) || string.IsNullOrEmpty(e.Name))
+                    continue;
+                string args = e.Arguments.Length == 0 ? "{}" : e.Arguments.ToString();
+                calls.Add(ChatToolCall.CreateFunctionToolCall(e.Id, e.Name, BinaryData.FromString(args)));
+            }
+            return calls;
         }
     }
 }

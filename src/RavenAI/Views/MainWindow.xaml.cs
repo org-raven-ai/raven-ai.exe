@@ -314,9 +314,11 @@ public partial class MainWindow : Window
         // PasswordBox intentionally does not expose Password via binding; pull them here.
         _vm.Settings.APIKeyInput = APIKeyBox.Password;
         _vm.Settings.AzureSpeechKeyInput = AzureSpeechKeyBox.Password;
+        _vm.Settings.WebSearchKeyInput = WebSearchKeyBox.Password;
         _vm.Settings.SaveCommand.Execute(null);
         APIKeyBox.Clear();
         AzureSpeechKeyBox.Clear();
+        WebSearchKeyBox.Clear();
     }
 
     // ---- Shutdown -------------------------------------------------------------------------

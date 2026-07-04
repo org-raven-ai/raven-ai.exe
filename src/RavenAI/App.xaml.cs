@@ -5,6 +5,7 @@ using System.Windows.Threading;
 using RavenAI.Models;
 using RavenAI.Services;
 using RavenAI.Services.Chat;
+using RavenAI.Services.Chat.Tools;
 using RavenAI.Services.Logging;
 using RavenAI.Services.Voice;
 using RavenAI.ViewModels;
@@ -48,24 +49,15 @@ public partial class App : Application
         _store = new SecureSettingsStore();
         _settings = _store.Load();
 
-        // --- Chat provider (reads fresh config + decrypts key per request) ---
-        var chatProvider = new OpenAIChatProvider(_http, () =>
-        (
-            apiKey: _store.GetAPIKey(_settings) ?? string.Empty,
-            baseURL: _settings.BaseURL,
-            model: _settings.Model,
-            systemPrompt: _settings.SystemPrompt
-        ));
-
         // --- Model catalog: lists /models for the Settings dropdowns (fresh key + base URL) ---
-        var modelCatalog = new OpenAIModelCatalog(_http, () =>
+        var modelCatalog = new OpenAIModelCatalog(() =>
         (
             apiKey: _store.GetAPIKey(_settings) ?? string.Empty,
             baseURL: _settings.BaseURL
         ));
 
         // --- Voice: STT + TTS (provider or offline fallback, chosen at speak time) ---
-        var stt = new OpenAISpeechToText(_http, () =>
+        var stt = new OpenAISpeechToText(() =>
         (
             apiKey: _store.GetAPIKey(_settings) ?? string.Empty,
             baseURL: _settings.BaseURL,
@@ -76,7 +68,7 @@ public partial class App : Application
         {
             if (_settings.UseOfflineTTS)
                 return new OfflineTextToSpeech();
-            return new OpenAITextToSpeech(_http, () =>
+            return new OpenAITextToSpeech(() =>
             (
                 apiKey: _store.GetAPIKey(_settings) ?? string.Empty,
                 baseURL: _settings.BaseURL,
@@ -99,6 +91,34 @@ public partial class App : Application
         var micRecognizer = new AzureSpeechRecognizer(azureSpeechConfig);
         var systemAudioRecognizer = new AzureSpeechRecognizer(azureSpeechConfig);
         var speechVm = new SpeechViewModel(micRecognizer, systemAudioRecognizer);
+
+        // --- Tools the chat model can call (registry is trivially extensible) ---
+        // Local/offline (time, calculator), web search (Tavily key from Settings), and app context
+        // (the live Azure Speech transcript). Each reads fresh config/state per call.
+        var toolRegistry = new ChatToolRegistry(new IChatTool[]
+        {
+            new CurrentTimeTool(),
+            new CalculatorTool(),
+            new WebSearchTool(_http, () =>
+            (
+                apiKey: _store.GetWebSearchKey(_settings) ?? string.Empty,
+                endpoint: _settings.WebSearchEndpoint
+            )),
+            new TranscriptTool(() =>
+            (
+                you: speechVm.You.FinalTranscript,
+                interviewer: speechVm.Interviewer.FinalTranscript
+            )),
+        });
+
+        // --- Chat provider (reads fresh config + decrypts key per request; runs the tool loop) ---
+        var chatProvider = new OpenAIChatProvider(() =>
+        (
+            apiKey: _store.GetAPIKey(_settings) ?? string.Empty,
+            baseURL: _settings.BaseURL,
+            model: _settings.Model,
+            systemPrompt: _settings.SystemPrompt
+        ), toolRegistry);
 
         var chatVm = new ChatViewModel(chatProvider, stt, ttsFactory, capture);
         var settingsVm = new SettingsViewModel(_store, _settings, modelCatalog);

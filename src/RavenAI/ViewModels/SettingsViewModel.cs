@@ -37,6 +37,8 @@ public sealed partial class SettingsViewModel : ObservableObject
         _azureSpeechEndpoint = settings.AzureSpeechEndpoint;
         _azureSpeechRecognitionLanguage = settings.AzureSpeechRecognitionLanguage;
         _hasStoredAzureSpeechKey = !string.IsNullOrEmpty(settings.EncryptedAzureSpeechApiKey);
+        _webSearchEndpoint = settings.WebSearchEndpoint;
+        _hasStoredWebSearchKey = !string.IsNullOrEmpty(settings.EncryptedWebSearchApiKey);
     }
 
     // These are manual properties rather than [ObservableProperty] because the MVVM source
@@ -67,6 +69,12 @@ public sealed partial class SettingsViewModel : ObservableObject
     public string AzureSpeechKeyInput { get => _azureSpeechKeyInput; set => SetProperty(ref _azureSpeechKeyInput, value); }
     [ObservableProperty] private string _azureSpeechEndpoint;
     [ObservableProperty] private string _azureSpeechRecognitionLanguage;
+
+    // Web search (Tavily) — independent credential, powers the assistant's web_search tool.
+    [ObservableProperty] private bool _hasStoredWebSearchKey;
+    private string _webSearchKeyInput = string.Empty; // plaintext only while typing; cleared after Save
+    public string WebSearchKeyInput { get => _webSearchKeyInput; set => SetProperty(ref _webSearchKeyInput, value); }
+    [ObservableProperty] private string _webSearchEndpoint;
 
     /// <summary>Whole-window opacity in percent (30–100). Applied live as the slider moves.</summary>
     [ObservableProperty] private int _windowOpacity;
@@ -103,6 +111,7 @@ public sealed partial class SettingsViewModel : ObservableObject
         _settings.WindowOpacityPercent = Math.Clamp(WindowOpacity, 30, 100);
         _settings.AzureSpeechEndpoint = (AzureSpeechEndpoint ?? string.Empty).Trim();
         _settings.AzureSpeechRecognitionLanguage = (AzureSpeechRecognitionLanguage ?? string.Empty).Trim();
+        _settings.WebSearchEndpoint = (WebSearchEndpoint ?? string.Empty).Trim();
 
         // Only overwrite the stored key if the user typed something new.
         if (!string.IsNullOrWhiteSpace(APIKeyInput))
@@ -117,10 +126,17 @@ public sealed partial class SettingsViewModel : ObservableObject
             HasStoredAzureSpeechKey = true;
         }
 
+        if (!string.IsNullOrWhiteSpace(WebSearchKeyInput))
+        {
+            _store.SetWebSearchKey(_settings, WebSearchKeyInput.Trim());
+            HasStoredWebSearchKey = true;
+        }
+
         _store.Save(_settings);
 
         APIKeyInput = string.Empty; // never keep plaintext around
         AzureSpeechKeyInput = string.Empty;
+        WebSearchKeyInput = string.Empty;
         StatusMessage = "Settings saved.";
         Saved?.Invoke();
     }
@@ -185,5 +201,15 @@ public sealed partial class SettingsViewModel : ObservableObject
         HasStoredAzureSpeechKey = false;
         AzureSpeechKeyInput = string.Empty;
         StatusMessage = "Stored Azure Speech key cleared.";
+    }
+
+    [RelayCommand]
+    private void ClearWebSearchKey()
+    {
+        _store.SetWebSearchKey(_settings, null);
+        _store.Save(_settings);
+        HasStoredWebSearchKey = false;
+        WebSearchKeyInput = string.Empty;
+        StatusMessage = "Stored web-search key cleared.";
     }
 }

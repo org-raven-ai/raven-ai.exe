@@ -1,20 +1,21 @@
-using System.Net.Http;
-using System.Net.Http.Headers;
-using System.Text.Json;
+using System.ClientModel;
+using System.IO;
+using OpenAI;
+using OpenAI.Audio;
 
 namespace RavenAI.Services.Voice;
 
 /// <summary>
-/// Speech-to-text via an OpenAI-compatible /audio/transcriptions endpoint (multipart upload).
+/// Speech-to-text via an OpenAI-compatible /audio/transcriptions endpoint, using the official
+/// OpenAI .NET SDK (<see cref="AudioClient"/>). The API key, base URL, and model are read fresh per
+/// call so the newest saved credentials (and provider) are always used.
 /// </summary>
 public sealed class OpenAISpeechToText : ISpeechToText
 {
-    private readonly HttpClient _http;
     private readonly Func<(string apiKey, string baseURL, string model)> _configProvider;
 
-    public OpenAISpeechToText(HttpClient http, Func<(string apiKey, string baseURL, string model)> configProvider)
+    public OpenAISpeechToText(Func<(string apiKey, string baseURL, string model)> configProvider)
     {
-        _http = http;
         _configProvider = configProvider;
     }
 
@@ -26,26 +27,18 @@ public sealed class OpenAISpeechToText : ISpeechToText
         if (wavAudio.Length == 0)
             return string.Empty;
 
-        string url = $"{baseURL.TrimEnd('/')}/audio/transcriptions";
+        AudioClient client = CreateClient(apiKey, baseURL, model);
 
-        using var form = new MultipartFormDataContent();
-        var audioContent = new ByteArrayContent(wavAudio);
-        audioContent.Headers.ContentType = new MediaTypeHeaderValue("audio/wav");
-        form.Add(audioContent, "file", "speech.wav");
-        form.Add(new StringContent(model), "model");
+        using var stream = new MemoryStream(wavAudio);
+        AudioTranscription transcription = await client.TranscribeAudioAsync(stream, "speech.wav");
+        return transcription.Text ?? string.Empty;
+    }
 
-        using var request = new HttpRequestMessage(HttpMethod.Post, url) { Content = form };
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
-
-        using HttpResponseMessage response = await _http.SendAsync(request, cancellationToken);
-        string raw = await response.Content.ReadAsStringAsync(cancellationToken);
-
-        if (!response.IsSuccessStatusCode)
-            throw new HttpRequestException($"Transcription failed ({(int)response.StatusCode}): {raw}");
-
-        using JsonDocument doc = JsonDocument.Parse(raw);
-        return doc.RootElement.TryGetProperty("text", out JsonElement text)
-            ? text.GetString() ?? string.Empty
-            : string.Empty;
+    private static AudioClient CreateClient(string apiKey, string baseURL, string model)
+    {
+        var options = new OpenAIClientOptions();
+        if (!string.IsNullOrWhiteSpace(baseURL))
+            options.Endpoint = new Uri(baseURL);
+        return new AudioClient(model, new ApiKeyCredential(apiKey), options);
     }
 }

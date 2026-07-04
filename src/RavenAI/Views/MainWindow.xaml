@@ -403,6 +403,33 @@
                         </StackPanel>
                     </Border>
 
+                    <!-- ===== Web Search (assistant tool) ===== -->
+                    <Border BorderBrush="{StaticResource PanelBg}" BorderThickness="0,1,0,0"
+                            Margin="0,4,0,12" Padding="0,12,0,0">
+                        <StackPanel>
+                            <TextBlock Text="Web Search (Tavily)" FontWeight="Bold"
+                                       Foreground="{StaticResource TextBrush}" Margin="0,0,0,8" />
+
+                            <TextBlock Text="Tavily API Key" Foreground="{StaticResource SubtleTextBrush}" />
+                            <PasswordBox x:Name="WebSearchKeyBox" Margin="0,4,0,2" Padding="8,6"
+                                         Background="{StaticResource PanelBg}" Foreground="{StaticResource TextBrush}" />
+                            <TextBlock Foreground="{StaticResource SubtleTextBrush}" FontSize="11" Margin="0,0,0,8"
+                                       TextWrapping="Wrap"
+                                       Text="Enables the assistant's web_search tool. Stored encrypted (DPAPI). Leave blank to keep the current key." />
+                            <TextBlock Text="✓ A web-search key is currently stored." Foreground="#7ED07E" FontSize="11" Margin="0,0,0,8"
+                                       Visibility="{Binding HasStoredWebSearchKey, Converter={StaticResource BoolToVisibility}}" />
+
+                            <TextBlock Text="Endpoint" Foreground="{StaticResource SubtleTextBrush}" />
+                            <TextBox Text="{Binding WebSearchEndpoint}" Margin="0,4,0,2" />
+                            <TextBlock Foreground="{StaticResource SubtleTextBrush}" FontSize="11" Margin="0,0,0,8"
+                                       TextWrapping="Wrap"
+                                       Text="Tavily-compatible search endpoint (default https://api.tavily.com/search)." />
+
+                            <Button Content="Clear Web-Search Key" Command="{Binding ClearWebSearchKeyCommand}"
+                                    Background="#555" HorizontalAlignment="Left" Padding="10,4" />
+                        </StackPanel>
+                    </Border>
+
                     <!-- ===== Window transparency ===== -->
                     <Grid Margin="0,0,0,12">
                         <Grid.ColumnDefinitions>

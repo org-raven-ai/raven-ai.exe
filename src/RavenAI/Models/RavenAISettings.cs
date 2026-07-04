@@ -50,6 +50,16 @@ public sealed class RavenAISettings
     public string AzureSpeechRecognitionLanguage { get; set; } = "en-US";
 
     /// <summary>
+    /// DPAPI-protected (CurrentUser scope), base64-encoded Tavily web-search API key. Powers the
+    /// assistant's web_search tool. Separate credential from the others; never plaintext. See
+    /// <see cref="Services.SecureSettingsStore"/>.
+    /// </summary>
+    public string? EncryptedWebSearchApiKey { get; set; }
+
+    /// <summary>Web-search endpoint (Tavily-compatible). Empty falls back to https://api.tavily.com/search.</summary>
+    public string WebSearchEndpoint { get; set; } = "https://api.tavily.com/search";
+
+    /// <summary>
     /// Whole-window opacity in percent (30–100), applied live via WPF Window.Opacity.
     /// Screen-capture exclusion still holds while translucent (verified at runtime; the
     /// protection watchdog and warning banner are the safety net).
