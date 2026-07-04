@@ -63,6 +63,27 @@ public partial class MainWindow : Window
         SetupHotkeys(hwnd);
         SetupTray();
         StartProtectionWatchdog(hwnd);
+
+        // Apply any saved transparency and keep it live as the settings slider moves.
+        _vm.Settings.WindowOpacityChanged += OnWindowOpacityChanged;
+        ApplyWindowOpacity(_vm.Settings.WindowOpacity);
+    }
+
+    // ---- Window transparency --------------------------------------------------------------
+
+    private void OnWindowOpacityChanged(int opacityPercent) => ApplyWindowOpacity(opacityPercent);
+
+    /// <summary>
+    /// Fades the whole window via WPF's native <see cref="System.Windows.Window.Opacity"/>.
+    /// This works because the window sets AllowsTransparency="True" (a per-pixel layered window).
+    /// On this app's target (Windows 10 2004+ / Windows 11) that layered mode still honours
+    /// WDA_EXCLUDEFROMCAPTURE, so the window stays hidden from screen captures while translucent
+    /// on the physical display. The protection watchdog keeps verifying that guarantee, and the
+    /// warning banner fires loudly if a given OS build ever fails to exclude a layered window.
+    /// </summary>
+    private void ApplyWindowOpacity(int opacityPercent)
+    {
+        Opacity = Math.Clamp(opacityPercent, 30, 100) / 100.0;
     }
 
     // ---- Screen-capture protection --------------------------------------------------------

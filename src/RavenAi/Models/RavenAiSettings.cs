@@ -32,4 +32,10 @@ public sealed class RavenAiSettings
 
     /// <summary>Use the Windows built-in offline TTS instead of the provider's TTS endpoint.</summary>
     public bool UseOfflineTts { get; set; }
+
+    /// <summary>
+    /// Whole-window opacity in percent (30–100). Applied via SetLayeredWindowAttributes
+    /// (LWA_ALPHA), never WPF AllowsTransparency, so screen-capture exclusion keeps working.
+    /// </summary>
+    public int WindowOpacityPercent { get; set; } = 100;
 }

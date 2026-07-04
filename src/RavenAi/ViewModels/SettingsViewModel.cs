@@ -27,6 +27,7 @@ public sealed partial class SettingsViewModel : ObservableObject
         _ttsVoice = settings.TtsVoice;
         _systemPrompt = settings.SystemPrompt;
         _useOfflineTts = settings.UseOfflineTts;
+        _windowOpacity = Math.Clamp(settings.WindowOpacityPercent, 30, 100);
         _hasStoredKey = !string.IsNullOrEmpty(settings.EncryptedApiKey);
     }
 
@@ -42,10 +43,18 @@ public sealed partial class SettingsViewModel : ObservableObject
     [ObservableProperty] private string _systemPrompt;
     [ObservableProperty] private bool _useOfflineTts;
 
+    /// <summary>Whole-window opacity in percent (30–100). Applied live as the slider moves.</summary>
+    [ObservableProperty] private int _windowOpacity;
+
     [ObservableProperty] private string _statusMessage = string.Empty;
 
     /// <summary>Raised after a successful save so the shell can hide the settings pane.</summary>
     public event Action? Saved;
+
+    /// <summary>Raised whenever the opacity slider moves so the window can apply it live.</summary>
+    public event Action<int>? WindowOpacityChanged;
+
+    partial void OnWindowOpacityChanged(int value) => WindowOpacityChanged?.Invoke(value);
 
     [RelayCommand]
     private void Save()
@@ -57,6 +66,7 @@ public sealed partial class SettingsViewModel : ObservableObject
         _settings.TtsVoice = (TtsVoice ?? string.Empty).Trim();
         _settings.SystemPrompt = SystemPrompt ?? string.Empty;
         _settings.UseOfflineTts = UseOfflineTts;
+        _settings.WindowOpacityPercent = Math.Clamp(WindowOpacity, 30, 100);
 
         // Only overwrite the stored key if the user typed something new.
         if (!string.IsNullOrWhiteSpace(ApiKeyInput))

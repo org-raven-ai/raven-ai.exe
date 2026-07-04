@@ -11,9 +11,14 @@
         ResizeMode="CanResizeWithGrip"
         ShowInTaskbar="True"
         Background="{StaticResource WindowBg}"
-        AllowsTransparency="False">
-    <!-- NOTE: AllowsTransparency is explicitly False. A transparent (WS_EX_LAYERED) window
-         can make SetWindowDisplayAffinity fail with error 8, defeating the whole app. -->
+        AllowsTransparency="True">
+    <!-- NOTE: AllowsTransparency is True so the window can be made translucent via Window.Opacity
+         (the transparency slider in Settings). This makes it a per-pixel WS_EX_LAYERED window.
+         On this app's target (Windows 10 2004+ / Windows 11) SetWindowDisplayAffinity with
+         WDA_EXCLUDEFROMCAPTURE still hides it from captures — verified at runtime, and the
+         protection watchdog + warning banner fail loudly if any OS build ever doesn't honour it.
+         (Historically some early Win11 builds returned error 8 for layered windows; the banner
+         is the safety net for that case.) -->
 
     <Grid>
         <Grid.RowDefinitions>
@@ -161,6 +166,23 @@
 
                     <CheckBox Content="Use Windows offline TTS (no network)" IsChecked="{Binding UseOfflineTts}"
                               Foreground="{StaticResource TextBrush}" Margin="0,4,0,12" />
+
+                    <!-- ===== Window transparency ===== -->
+                    <Grid Margin="0,0,0,12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0" Text="Window transparency"
+                                   Foreground="{StaticResource SubtleTextBrush}" VerticalAlignment="Center" />
+                        <TextBlock Grid.Column="1" Foreground="{StaticResource TextBrush}" VerticalAlignment="Center"
+                                   Text="{Binding WindowOpacity, StringFormat={}{0}%}" />
+                    </Grid>
+                    <Slider Minimum="30" Maximum="100" TickFrequency="10" IsSnapToTickEnabled="False"
+                            Value="{Binding WindowOpacity, Mode=TwoWay}" Margin="0,0,0,4" />
+                    <TextBlock Foreground="{StaticResource SubtleTextBrush}" FontSize="11" Margin="0,0,0,12"
+                               TextWrapping="Wrap"
+                               Text="Fades the whole window on your screen, applied live. The window stays hidden from screen shares/recordings — watch the status dot in the title bar; if it ever turns red, the warning banner explains that protection is off." />
 
                     <StackPanel Orientation="Horizontal">
                         <Button Content="Save" Click="SaveSettings_Click" />
