@@ -7,7 +7,6 @@ using System.Windows.Threading;
 using RavenAI.Services;
 using RavenAI.Services.Voice;
 using RavenAI.ViewModels;
-using Forms = System.Windows.Forms;
 
 namespace RavenAI.Views;
 
@@ -22,9 +21,7 @@ public partial class MainWindow : Window
     private readonly GlobalHotkeyService _hotkeys;
     private readonly NAudioCapture _capture;
 
-    private Forms.NotifyIcon? _tray;
     private DispatcherTimer? _protectionWatchdog;
-    private bool _reallyExit;
 
     // Virtual-key codes for the hotkeys.
     private const uint VK_SPACE = 0x20;
@@ -61,7 +58,6 @@ public partial class MainWindow : Window
 
         ApplyCaptureProtection(hwnd);
         SetupHotkeys(hwnd);
-        SetupTray();
         StartProtectionWatchdog(hwnd);
 
         // Apply any saved transparency and keep it live as the settings slider moves.
@@ -162,24 +158,6 @@ public partial class MainWindow : Window
         }
     }
 
-    // ---- Tray icon ------------------------------------------------------------------------
-
-    private void SetupTray()
-    {
-        _tray = new Forms.NotifyIcon
-        {
-            Icon = System.Drawing.SystemIcons.Shield,
-            Visible = true,
-            Text = "raven_ai",
-        };
-        _tray.DoubleClick += (_, _) => ToggleVisibility();
-
-        var menu = new Forms.ContextMenuStrip();
-        menu.Items.Add("Show / Hide", null, (_, _) => ToggleVisibility());
-        menu.Items.Add("Quit", null, (_, _) => { _reallyExit = true; Close(); });
-        _tray.ContextMenuStrip = menu;
-    }
-
     // ---- Window chrome interactions -------------------------------------------------------
 
     // Manual title-bar drag. DragMove() enters the OS modal move loop, which triggers
@@ -254,22 +232,11 @@ public partial class MainWindow : Window
 
     protected override void OnClosing(CancelEventArgs e)
     {
-        // Close button / hotkey hides to tray instead of quitting, unless "Quit" was chosen.
-        if (!_reallyExit)
-        {
-            e.Cancel = true;
-            Hide();
-            return;
-        }
-
+        // No tray icon (the overlay stays invisible everywhere in the shell), so ✕ really
+        // quits. Hiding is the minimize button or the Ctrl+Shift+Space hotkey.
         _protectionWatchdog?.Stop();
         _hotkeys.Dispose();
         _capture.Dispose();
-        if (_tray != null)
-        {
-            _tray.Visible = false;
-            _tray.Dispose();
-        }
         base.OnClosing(e);
         Application.Current.Shutdown();
     }

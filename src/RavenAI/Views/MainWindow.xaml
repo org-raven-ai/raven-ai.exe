@@ -52,8 +52,9 @@
                     <Button Content="Settings" Command="{Binding ToggleSettingsCommand}"
                             Background="Transparent" Padding="8,4" />
                     <Button Content="—" Click="Minimize_Click" Background="Transparent"
-                            Padding="10,4" ToolTip="Minimize to tray" />
-                    <Button Content="✕" Click="Close_Click" Background="Transparent" Padding="10,4" />
+                            Padding="10,4" ToolTip="Hide (Ctrl+Shift+Space to show)" />
+                    <Button Content="✕" Click="Close_Click" Background="Transparent"
+                            Padding="10,4" ToolTip="Quit" />
                 </StackPanel>
             </Grid>
         </Border>
