@@ -463,24 +463,31 @@ public partial class MainWindow : Window
         FakeCursorTransform.Y = _fakeCursor.Y;
     }
 
-    // Scales the vector arrow to match the real cursor's on-screen size: the OS cursor's pixel size
-    // (which reflects the pointer-size accessibility setting) times the monitor DPI scale (applied
-    // by Windows at draw time), times the size knob, divided by this window's composition scale so
-    // it renders at the right physical size whether or not the overlay itself is DPI-scaled. The
-    // arrow geometry is authored for a 32px cursor, so scale 1.0 == a 32px cursor.
+    // Scales the vector arrow to match the real cursor's on-screen size. GetCurrentCursorSize is the
+    // real cursor's physical pixel size (already reflecting both the display scale and the
+    // pointer-size setting). The arrow geometry is authored for a 32px cursor and is drawn in this
+    // window's DIU, which the window renders to physical pixels at its own composition scale — so
+    // dividing by that scale applies DPI exactly once (never double-counted). scale 1.0 (with the
+    // size knob at 1.0) == the real cursor's size.
     private void UpdateCursorScale()
     {
         PresentationSource? src = PresentationSource.FromVisual(this);
         double windowScale = src?.CompositionTarget?.TransformToDevice.M11 ?? 1.0;
         if (windowScale <= 0) windowScale = 1.0;
 
-        double monitorScale = NativePointer.GetWindowDpiScale(new WindowInteropHelper(this).Handle);
-        int bitmapPx = NativePointer.GetCurrentCursorSize();
-        if (bitmapPx <= 0) bitmapPx = 32;
+        IntPtr hwnd = new WindowInteropHelper(this).Handle;
+        double monitorScale = NativePointer.GetWindowDpiScale(hwnd);
+        int cursorPx = NativePointer.GetCurrentCursorSize();
+        if (cursorPx <= 0) cursorPx = (int)Math.Round(32 * windowScale);
 
-        double scale = bitmapPx / 32.0 * monitorScale * CursorSizeScale / windowScale;
+        double scale = cursorPx / (32.0 * windowScale) * CursorSizeScale;
         FakeCursorScale.ScaleX = scale;
         FakeCursorScale.ScaleY = scale;
+
+        // Diagnostic: surfaces the real numbers in the Logs panel so cursor sizing can be verified.
+        Services.Logging.Log.Info(
+            $"Cursor scale: windowScale={windowScale:0.##} monitorDpiScale={monitorScale:0.##} " +
+            $"cursorPx={cursorPx} sizeKnob={CursorSizeScale:0.##} -> scale={scale:0.###}", "Cursor");
     }
 
     // Extends the active text-box selection from the press anchor to the character under the cursor.
