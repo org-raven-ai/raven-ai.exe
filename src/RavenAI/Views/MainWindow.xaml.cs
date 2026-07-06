@@ -53,10 +53,13 @@ public partial class MainWindow : Window
     private ButtonBase? _pressedButton;
 
     // Fake-cursor rendering: the real OS cursor bitmaps (arrow / I-beam / hand) with their
-    // hot-spots (in DIU), plus which one is currently shown.
+    // hot-spots (in DIU), plus which one is currently shown. Rebuilt on each enter for the current
+    // DPI + system cursor size.
     private readonly Dictionary<SystemCursorKind, (BitmapSource Image, Point Hotspot)> _cursorImages = new();
     private SystemCursorKind _cursorKind = SystemCursorKind.Arrow;
     private Point _cursorHotspot;
+    private double _dpiScale = 1.0;      // device pixels per DIU
+    private int _targetCursorPx = 32;    // real on-screen cursor size in physical pixels
 
     // Movement multiplier for the fake cursor: 1.0 maps the raw device delta 1:1; lower is slower,
     // higher is faster. Tuned to 0.8 so it tracks a bit slower than raw, closer to the real pointer.
@@ -306,6 +309,11 @@ public partial class MainWindow : Window
         if (!IsVisible)
             Show();
 
+        // Size the painted cursor to match the real one: measure the current DPI and the OS
+        // cursor's actual pixel size (which already accounts for DPI + the pointer-size setting),
+        // then rebuild the cursor bitmaps at that size.
+        PrepareCursorSizing();
+
         // Start the fake cursor where the real pointer currently is, showing the arrow.
         Native.NativeCursor.POINT p = Native.NativeCursor.GetPosition();
         _fakeCursor = ClampToCanvas(RootCanvas.PointFromScreen(new Point(p.X, p.Y)));
@@ -496,21 +504,43 @@ public partial class MainWindow : Window
         MoveFakeCursor();
     }
 
-    // Loads (once, then caches) the real OS cursor bitmap + hot-spot for a kind. The bitmap comes
-    // back at 96 DPI, so its pixel size equals its DIU size and the pixel hot-spot equals the DIU
-    // hot-spot; WPF then scales it with the screen DPI just like the real cursor.
+    // Captures the current DPI and real cursor pixel size, sizes the cursor Image so its bitmaps
+    // render at exactly the real physical size, and clears the cache so bitmaps rebuild at that size.
+    private void PrepareCursorSizing()
+    {
+        PresentationSource? src = PresentationSource.FromVisual(this);
+        _dpiScale = src?.CompositionTarget?.TransformToDevice.M11 ?? 1.0;
+        if (_dpiScale <= 0) _dpiScale = 1.0;
+
+        int measured = NativePointer.GetCurrentCursorSize();
+        _targetCursorPx = measured > 0 ? measured : (int)Math.Round(32 * _dpiScale);
+
+        // The bitmap is _targetCursorPx physical px; drawn at that many DIU / _dpiScale it occupies
+        // exactly _targetCursorPx device px on screen — the same size as the real cursor.
+        double sizeDiu = _targetCursorPx / _dpiScale;
+        FakeCursorImage.Width = sizeDiu;
+        FakeCursorImage.Height = sizeDiu;
+
+        _cursorImages.Clear();
+        _cursorKind = SystemCursorKind.Arrow;
+        FakeCursorImage.Source = null;
+    }
+
+    // Loads (once per size, then caches) the real OS cursor bitmap + hot-spot for a kind, at the
+    // measured cursor size. The hot-spot is returned in the bitmap's physical pixels, converted to
+    // DIU (÷ DPI) so it lines up with the DIU-positioned image.
     private (BitmapSource Image, Point Hotspot) GetCursorImage(SystemCursorKind kind)
     {
         if (_cursorImages.TryGetValue(kind, out var cached))
             return cached;
 
-        IntPtr handle = NativePointer.LoadSystemCursor(kind);
+        IntPtr handle = NativePointer.LoadSystemCursor(kind, _targetCursorPx);
         (int hx, int hy) = NativePointer.GetHotspot(handle);
         BitmapSource image = Imaging.CreateBitmapSourceFromHIcon(
             handle, Int32Rect.Empty, BitmapSizeOptions.FromEmptyOptions());
         image.Freeze();
 
-        var entry = (image, new Point(hx, hy));
+        var entry = (image, new Point(hx / _dpiScale, hy / _dpiScale));
         _cursorImages[kind] = entry;
         return entry;
     }

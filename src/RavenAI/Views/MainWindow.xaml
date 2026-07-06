@@ -521,8 +521,8 @@
                 Visibility="{Binding IsInteractive, Converter={StaticResource BoolToVisibility}}">
             <!-- The genuine OS cursor bitmap (arrow / I-beam / hand) rendered by the code-behind and
                  positioned so its hot-spot lands on the fake-cursor point via FakeCursorTransform. -->
-            <Image x:Name="FakeCursorImage" Stretch="None" SnapsToDevicePixels="True"
-                   RenderOptions.BitmapScalingMode="NearestNeighbor">
+            <Image x:Name="FakeCursorImage" Stretch="Uniform" SnapsToDevicePixels="True"
+                   RenderOptions.BitmapScalingMode="HighQuality">
                 <Image.RenderTransform>
                     <TranslateTransform x:Name="FakeCursorTransform" X="0" Y="0" />
                 </Image.RenderTransform>
