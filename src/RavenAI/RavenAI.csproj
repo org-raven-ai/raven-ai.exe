@@ -33,8 +33,8 @@
   <!-- Stamp the git commit + build time into assembly metadata so the exact running build is
        identifiable in-app (Settings "Build" line + the startup log). Never fails the build. -->
   <Target Name="StampBuildInfo" BeforeTargets="GetAssemblyAttributes">
-    <!-- --match a non-existent tag so describe falls back to a plain short SHA (+ -dirty), instead
-         of the verbose "tag-N-gSHA" form. -->
+    <!-- Match a nonexistent tag so describe falls back to a plain short SHA (plus a dirty flag)
+         instead of the verbose tag/count/sha form. -->
     <Exec Command="git describe --always --dirty --abbrev=8 --match=__no_tag__"
           ConsoleToMSBuild="true" ContinueOnError="true" StandardOutputImportance="low"
           WorkingDirectory="$(MSBuildProjectDirectory)">

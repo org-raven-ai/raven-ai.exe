@@ -61,8 +61,9 @@ public partial class MainWindow : Window
     private double _windowScale = 1.0;   // this window's device pixels per DIU (WPF composition)
     private int _targetCursorPx = 32;    // fake-cursor bitmap size in physical pixels
 
-    // Fine-tune the fake cursor's size relative to the real one: 1.0 = exact match, lower = smaller.
-    private const double CursorSizeScale = 0.9;
+    // Fine-tune the fake cursor's size relative to the real one: 1.0 = exact match. Hardcoded to
+    // 2.0 (double size) per request.
+    private const double CursorSizeScale = 2.0;
 
     // Movement multiplier for the fake cursor: 1.0 maps the raw device delta 1:1; lower is slower,
     // higher is faster. Tuned to 0.8 so it tracks a bit slower than raw, closer to the real pointer.
