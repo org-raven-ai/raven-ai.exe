@@ -34,7 +34,7 @@ public partial class App : Application
         var logger = new Logger();
         Log.Init(logger);
         HookGlobalExceptionHandlers();
-        Log.Info("raven_ai starting", "App");
+        Log.Info($"raven_ai starting — {BuildInfo.Summary}", "App");
 
         // --- Single instance: if we're not the first, wake the running window and exit. ---
         _singleInstance = new SingleInstanceGuard();
