@@ -54,10 +54,11 @@ public partial class MainWindow : Window
     // Fake cursor is drawn as a vector arrow (crisp at any size, unlike the raster OS cursor). Its
     // geometry is authored for a 32px cursor with the tip at (0,0); a ScaleTransform sizes it.
 
-    // Fine-tune the fake cursor's size relative to the real one. The vector arrow glyph is a touch
-    // larger, relative to the cursor box, than the real Windows arrow, so trim it slightly (0.85)
-    // to match. This is a constant proportion; the DPI/pointer-size scaling is handled separately.
-    private const double CursorSizeScale = 0.85;
+    // Fine-tune the fake cursor's size relative to the real one. The vector arrow glyph (plus its
+    // scaled outline stroke) is larger, relative to the cursor box, than the real Windows arrow, so
+    // trim it (0.75) to match. This is a constant proportion; the DPI/pointer-size scaling is
+    // handled separately.
+    private const double CursorSizeScale = 0.75;
 
     // Movement multiplier for the fake cursor: 1.0 maps the raw device delta 1:1; lower is slower,
     // higher is faster. Tuned to 0.8 so it tracks a bit slower than raw, closer to the real pointer.
