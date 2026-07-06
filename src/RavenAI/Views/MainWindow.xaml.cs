@@ -56,9 +56,9 @@ public partial class MainWindow : Window
 
     // Fine-tune the fake cursor's size relative to the real one. The vector arrow glyph (plus its
     // scaled outline stroke) is larger, relative to the cursor box, than the real Windows arrow, so
-    // trim it (0.75) to match. This is a constant proportion; the DPI/pointer-size scaling is
+    // trim it (0.73) to match. This is a constant proportion; the DPI/pointer-size scaling is
     // handled separately.
-    private const double CursorSizeScale = 0.75;
+    private const double CursorSizeScale = 0.73;
 
     // Movement multiplier for the fake cursor: 1.0 maps the raw device delta 1:1; lower is slower,
     // higher is faster. Tuned to 0.8 so it tracks a bit slower than raw, closer to the real pointer.
