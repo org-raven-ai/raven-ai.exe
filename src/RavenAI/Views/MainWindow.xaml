@@ -532,14 +532,17 @@
         <!-- ===== Fake cursor layer (painted; drawn on top of everything) ===== -->
         <Canvas x:Name="CursorLayer" IsHitTestVisible="False"
                 Visibility="{Binding IsInteractive, Converter={StaticResource BoolToVisibility}}">
-            <!-- The genuine OS cursor bitmap (arrow / I-beam / hand) rendered by the code-behind and
-                 positioned so its hot-spot lands on the fake-cursor point via FakeCursorTransform. -->
-            <Image x:Name="FakeCursorImage" Stretch="Uniform" SnapsToDevicePixels="True"
-                   RenderOptions.BitmapScalingMode="HighQuality">
-                <Image.RenderTransform>
-                    <TranslateTransform x:Name="FakeCursorTransform" X="0" Y="0" />
-                </Image.RenderTransform>
-            </Image>
+            <!-- A vector arrow pointer (crisp at any scale), tip at (0,0). FakeCursorScale sizes it to
+                 match the real cursor; FakeCursorTransform positions the tip on the fake-cursor point. -->
+            <Path Fill="White" Stroke="#202024" StrokeThickness="1"
+                  Data="M 0,0 L 0,17 L 4.5,13 L 7.5,19.5 L 10,18.3 L 7,12 L 12.5,12 Z">
+                <Path.RenderTransform>
+                    <TransformGroup>
+                        <ScaleTransform x:Name="FakeCursorScale" ScaleX="1" ScaleY="1" />
+                        <TranslateTransform x:Name="FakeCursorTransform" X="0" Y="0" />
+                    </TransformGroup>
+                </Path.RenderTransform>
+            </Path>
         </Canvas>
     </Grid>
 </Window>

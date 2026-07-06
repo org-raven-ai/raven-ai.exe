@@ -7,7 +7,6 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
-using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using RavenAI.Native;
 using RavenAI.Services;
@@ -52,17 +51,11 @@ public partial class MainWindow : Window
     // The button pressed by the fake cursor, invoked on release if still under the cursor.
     private ButtonBase? _pressedButton;
 
-    // Fake-cursor rendering: the real OS cursor bitmaps (arrow / I-beam / hand) with their
-    // hot-spots (in DIU), plus which one is currently shown. Rebuilt on each enter for the current
-    // DPI + system cursor size.
-    private readonly Dictionary<SystemCursorKind, (BitmapSource Image, Point Hotspot)> _cursorImages = new();
-    private SystemCursorKind _cursorKind = SystemCursorKind.Arrow;
-    private Point _cursorHotspot;
-    private double _windowScale = 1.0;   // this window's device pixels per DIU (WPF composition)
-    private int _targetCursorPx = 32;    // fake-cursor bitmap size in physical pixels
+    // Fake cursor is drawn as a vector arrow (crisp at any size, unlike the raster OS cursor). Its
+    // geometry is authored for a 32px cursor with the tip at (0,0); a ScaleTransform sizes it.
 
-    // Fine-tune the fake cursor's size relative to the real one: 1.0 = exact match. Hardcoded to
-    // 2.0 (double size) per request.
+    // Fine-tune the fake cursor's size relative to the real one: 1.0 = match a 32px cursor.
+    // Hardcoded to 2.0 (double size) per request.
     private const double CursorSizeScale = 2.0;
 
     // Movement multiplier for the fake cursor: 1.0 maps the raw device delta 1:1; lower is slower,
@@ -313,15 +306,12 @@ public partial class MainWindow : Window
         if (!IsVisible)
             Show();
 
-        // Size the painted cursor to match the real one: measure the current DPI and the OS
-        // cursor's actual pixel size (which already accounts for DPI + the pointer-size setting),
-        // then rebuild the cursor bitmaps at that size.
-        PrepareCursorSizing();
+        // Size the painted arrow to match the real cursor at the current DPI + pointer-size setting.
+        UpdateCursorScale();
 
-        // Start the fake cursor where the real pointer currently is, showing the arrow.
+        // Start the fake cursor where the real pointer currently is.
         Native.NativeCursor.POINT p = Native.NativeCursor.GetPosition();
         _fakeCursor = ClampToCanvas(RootCanvas.PointFromScreen(new Point(p.X, p.Y)));
-        SetCursorKind(SystemCursorKind.Arrow);
         MoveFakeCursor();
 
         _draggingCard = null;
@@ -373,12 +363,7 @@ public partial class MainWindow : Window
         }
 
         if (_selectingTextBox is not null)
-        {
             ExtendTextSelection(_selectingTextBox);
-            return;
-        }
-
-        UpdateHoverCursor();
     }
 
     private void OnInteractiveButtonPressed(OverlayMouseButton button)
@@ -474,89 +459,29 @@ public partial class MainWindow : Window
 
     private void MoveFakeCursor()
     {
-        // Offset by the cursor's hot-spot so the "point" of the arrow (or the I-beam's centre)
-        // lands exactly on the fake-cursor position, like the real cursor.
-        FakeCursorTransform.X = _fakeCursor.X - _cursorHotspot.X;
-        FakeCursorTransform.Y = _fakeCursor.Y - _cursorHotspot.Y;
+        // The arrow's tip is authored at (0,0), so the translate is simply the cursor position.
+        FakeCursorTransform.X = _fakeCursor.X;
+        FakeCursorTransform.Y = _fakeCursor.Y;
     }
 
-    /// <summary>Picks arrow / I-beam / hand based on what the fake cursor is hovering, like the OS.</summary>
-    private void UpdateHoverCursor()
-    {
-        DependencyObject? hit = HitTest(_fakeCursor);
-        SystemCursorKind kind = SystemCursorKind.Arrow;
-        if (hit is not null)
-        {
-            if (FindAncestor<TextBoxBase>(hit) is not null)
-                kind = SystemCursorKind.IBeam;
-            else if (FindAncestor<ButtonBase>(hit) is not null)
-                kind = SystemCursorKind.Hand;
-        }
-        SetCursorKind(kind);
-    }
-
-    /// <summary>Swaps the painted cursor bitmap (and its hot-spot) to the given kind.</summary>
-    private void SetCursorKind(SystemCursorKind kind)
-    {
-        if (_cursorKind == kind && FakeCursorImage.Source is not null)
-            return;
-
-        (BitmapSource Image, Point Hotspot) entry = GetCursorImage(kind);
-        _cursorKind = kind;
-        _cursorHotspot = entry.Hotspot;
-        FakeCursorImage.Source = entry.Image;
-        MoveFakeCursor();
-    }
-
-    // Sizes the cursor Image to match the real on-screen cursor, then clears the cache so the
-    // bitmaps rebuild at that size. The real cursor's physical size is its bitmap size (which
-    // reflects the pointer-size accessibility setting) times the monitor DPI scale (which Windows
-    // applies at draw time and the bitmap size alone does NOT capture). We then convert that
-    // physical size to this window's DIU using its own composition scale, so it renders 1:1 whether
-    // or not the overlay itself is DPI-scaled.
-    private void PrepareCursorSizing()
+    // Scales the vector arrow to match the real cursor's on-screen size: the OS cursor's pixel size
+    // (which reflects the pointer-size accessibility setting) times the monitor DPI scale (applied
+    // by Windows at draw time), times the size knob, divided by this window's composition scale so
+    // it renders at the right physical size whether or not the overlay itself is DPI-scaled. The
+    // arrow geometry is authored for a 32px cursor, so scale 1.0 == a 32px cursor.
+    private void UpdateCursorScale()
     {
         PresentationSource? src = PresentationSource.FromVisual(this);
-        _windowScale = src?.CompositionTarget?.TransformToDevice.M11 ?? 1.0;
-        if (_windowScale <= 0) _windowScale = 1.0;
+        double windowScale = src?.CompositionTarget?.TransformToDevice.M11 ?? 1.0;
+        if (windowScale <= 0) windowScale = 1.0;
 
-        IntPtr hwnd = new WindowInteropHelper(this).Handle;
-        double monitorScale = NativePointer.GetWindowDpiScale(hwnd);
-
+        double monitorScale = NativePointer.GetWindowDpiScale(new WindowInteropHelper(this).Handle);
         int bitmapPx = NativePointer.GetCurrentCursorSize();
         if (bitmapPx <= 0) bitmapPx = 32;
 
-        double physicalPx = bitmapPx * monitorScale * CursorSizeScale;
-        _targetCursorPx = Math.Max(8, (int)Math.Round(physicalPx));
-
-        // Drawn at (physical px / window composition scale) DIU, the bitmap occupies that many
-        // device px on screen — matching the real cursor.
-        double sizeDiu = _targetCursorPx / _windowScale;
-        FakeCursorImage.Width = sizeDiu;
-        FakeCursorImage.Height = sizeDiu;
-
-        _cursorImages.Clear();
-        _cursorKind = SystemCursorKind.Arrow;
-        FakeCursorImage.Source = null;
-    }
-
-    // Loads (once per size, then caches) the real OS cursor bitmap + hot-spot for a kind, at the
-    // target cursor size. The hot-spot is returned in the bitmap's physical pixels, converted to
-    // DIU (÷ the window composition scale) so it lines up with the DIU-positioned image.
-    private (BitmapSource Image, Point Hotspot) GetCursorImage(SystemCursorKind kind)
-    {
-        if (_cursorImages.TryGetValue(kind, out var cached))
-            return cached;
-
-        IntPtr handle = NativePointer.LoadSystemCursor(kind, _targetCursorPx);
-        (int hx, int hy) = NativePointer.GetHotspot(handle);
-        BitmapSource image = Imaging.CreateBitmapSourceFromHIcon(
-            handle, Int32Rect.Empty, BitmapSizeOptions.FromEmptyOptions());
-        image.Freeze();
-
-        var entry = (image, new Point(hx / _windowScale, hy / _windowScale));
-        _cursorImages[kind] = entry;
-        return entry;
+        double scale = bitmapPx / 32.0 * monitorScale * CursorSizeScale / windowScale;
+        FakeCursorScale.ScaleX = scale;
+        FakeCursorScale.ScaleY = scale;
     }
 
     // Extends the active text-box selection from the press anchor to the character under the cursor.

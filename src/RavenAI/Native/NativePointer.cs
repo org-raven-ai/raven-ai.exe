@@ -2,29 +2,13 @@ using System.Runtime.InteropServices;
 
 namespace RavenAI.Native;
 
-/// <summary>Standard system cursors the overlay paints in place of the frozen real pointer.</summary>
-public enum SystemCursorKind
-{
-    Arrow,
-    IBeam,
-    Hand,
-}
-
 /// <summary>
-/// P/Invoke used to make the painted fake cursor look like the real one: it loads the actual
-/// system cursor bitmaps (arrow / I-beam / hand, with their true hot-spots) at the current
-/// on-screen cursor size — which reflects both the display DPI and the Windows "mouse pointer
-/// size" accessibility setting — so the overlay can render the genuine OS cursor at the right size.
+/// P/Invoke used to size the painted (vector) fake cursor to match the real one: it reads the
+/// current cursor's pixel size (which reflects the Windows "mouse pointer size" accessibility
+/// setting) and the monitor's DPI scale (which Windows applies to the cursor at draw time).
 /// </summary>
 internal static class NativePointer
 {
-    private const int IDC_ARROW = 32512;
-    private const int IDC_IBEAM = 32513;
-    private const int IDC_HAND = 32649;
-
-    private const uint IMAGE_CURSOR = 2;
-    private const uint LR_SHARED = 0x00008000;
-
     [StructLayout(LayoutKind.Sequential)]
     private struct ICONINFO
     {
@@ -57,12 +41,6 @@ internal static class NativePointer
     }
 
     [DllImport("user32.dll", SetLastError = true)]
-    private static extern IntPtr LoadCursor(IntPtr hInstance, IntPtr lpCursorName);
-
-    [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
-    private static extern IntPtr LoadImageW(IntPtr hInst, IntPtr name, uint type, int cx, int cy, uint fuLoad);
-
-    [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool GetIconInfo(IntPtr hIcon, out ICONINFO piconinfo);
 
@@ -80,30 +58,6 @@ internal static class NativePointer
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool DeleteObject(IntPtr hObject);
 
-    private static int CursorId(SystemCursorKind kind) => kind switch
-    {
-        SystemCursorKind.IBeam => IDC_IBEAM,
-        SystemCursorKind.Hand => IDC_HAND,
-        _ => IDC_ARROW,
-    };
-
-    /// <summary>
-    /// Returns a handle to a standard system cursor, scaled to <paramref name="sizePixels"/> square
-    /// when positive (matching the real on-screen cursor size), else the default base size. The
-    /// handle is system-owned (shared) and must NOT be destroyed.
-    /// </summary>
-    public static IntPtr LoadSystemCursor(SystemCursorKind kind, int sizePixels)
-    {
-        int id = CursorId(kind);
-        if (sizePixels > 0)
-        {
-            IntPtr scaled = LoadImageW(IntPtr.Zero, (IntPtr)id, IMAGE_CURSOR, sizePixels, sizePixels, LR_SHARED);
-            if (scaled != IntPtr.Zero)
-                return scaled;
-        }
-        return LoadCursor(IntPtr.Zero, (IntPtr)id);
-    }
-
     /// <summary>
     /// The DPI scale (1.0 = 96 DPI, 1.5 = 150%) of the monitor the window is on. This is the factor
     /// by which Windows enlarges the base cursor at draw time, which the cursor bitmap size alone
@@ -115,21 +69,9 @@ internal static class NativePointer
         return dpi > 0 ? dpi / 96.0 : 1.0;
     }
 
-    /// <summary>The cursor's hot-spot (the pixel that is "the point") in cursor-bitmap pixels.</summary>
-    public static (int X, int Y) GetHotspot(IntPtr hCursor)
-    {
-        if (hCursor == IntPtr.Zero || !GetIconInfo(hCursor, out ICONINFO info))
-            return (0, 0);
-
-        // GetIconInfo creates bitmaps we own; free them so we don't leak GDI objects.
-        if (info.hbmMask != IntPtr.Zero) DeleteObject(info.hbmMask);
-        if (info.hbmColor != IntPtr.Zero) DeleteObject(info.hbmColor);
-        return (info.xHotspot, info.yHotspot);
-    }
-
     /// <summary>
-    /// The current cursor's height in physical pixels — the real size Windows is drawing, already
-    /// reflecting the display DPI and the pointer-size accessibility setting. Returns 0 if unknown.
+    /// The current cursor's height in pixels — reflecting the pointer-size accessibility setting
+    /// (but not the DPI scale, which Windows applies at draw time). Returns 0 if unknown.
     /// </summary>
     public static int GetCurrentCursorSize()
     {
