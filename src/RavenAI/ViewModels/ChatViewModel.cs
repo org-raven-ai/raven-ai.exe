@@ -50,6 +50,12 @@ public sealed partial class ChatViewModel : ObservableObject
         await SendMessageAsync(text, speakReply: false);
     }
 
+    /// <summary>
+    /// Submits text originating outside the chat box — the transcription-staging window's Send
+    /// button hands its batched transcript here. Behaves like a typed message (streamed, not spoken).
+    /// </summary>
+    public Task SubmitExternalAsync(string text) => SendMessageAsync(text, speakReply: false);
+
     /// <summary>Sends user text, appends an assistant bubble, and streams the reply into it.</summary>
     private async Task SendMessageAsync(string userText, bool speakReply)
     {

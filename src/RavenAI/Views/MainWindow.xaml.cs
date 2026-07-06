@@ -8,6 +8,7 @@ using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Threading;
+using RavenAI.Native;
 using RavenAI.Services;
 using RavenAI.Services.Overlay;
 using RavenAI.Services.Voice;
@@ -19,6 +20,7 @@ using ButtonBase = System.Windows.Controls.Primitives.ButtonBase;
 using TextBoxBase = System.Windows.Controls.Primitives.TextBoxBase;
 using Control = System.Windows.Controls.Control;
 using ComboBox = System.Windows.Controls.ComboBox;
+using TextBox = System.Windows.Controls.TextBox;
 
 namespace RavenAI.Views;
 
@@ -44,10 +46,27 @@ public partial class MainWindow : Window
 
     // Fake-cursor position, in RootCanvas (device-independent) coordinates.
     private Point _fakeCursor;
-    // Drag state while the fake cursor is holding the title bar.
-    private bool _panelDragging;
+    // The card whose title bar the fake cursor is currently dragging (null when not dragging).
+    private Border? _draggingCard;
     // The button pressed by the fake cursor, invoked on release if still under the cursor.
     private ButtonBase? _pressedButton;
+
+    // Fake cursor is drawn as a vector arrow (crisp at any size, unlike the raster OS cursor). Its
+    // geometry is authored for a 32px cursor with the tip at (0,0); a ScaleTransform sizes it.
+
+    // Fine-tune the fake cursor's size relative to the real one. The vector arrow glyph (plus its
+    // scaled outline stroke) is larger, relative to the cursor box, than the real Windows arrow, so
+    // trim it (0.71) to match. This is a constant proportion; the DPI/pointer-size scaling is
+    // handled separately.
+    private const double CursorSizeScale = 0.71;
+
+    // Movement multiplier for the fake cursor: 1.0 maps the raw device delta 1:1; lower is slower,
+    // higher is faster. Tuned to 0.8 so it tracks a bit slower than raw, closer to the real pointer.
+    private const double CursorSpeedMultiplier = 0.8;
+
+    // Drag-to-select state while the fake cursor holds the button down over a text box.
+    private TextBox? _selectingTextBox;
+    private int _selectionAnchor;
 
     // Virtual-key codes for the hotkeys.
     private const uint VK_SPACE = 0x20;
@@ -77,26 +96,42 @@ public partial class MainWindow : Window
                 LogScroll.ScrollToEnd();
         };
 
+        // Keep the staging window pinned to the newest committed transcription.
+        _vm.Speech.Staged.CollectionChanged += (_, e) =>
+        {
+            if (e.Action == System.Collections.Specialized.NotifyCollectionChangedAction.Add)
+                StagingScroll.ScrollToEnd();
+        };
+
         // Cover the whole virtual desktop (all monitors). The card is positioned within it.
         Left = SystemParameters.VirtualScreenLeft;
         Top = SystemParameters.VirtualScreenTop;
         Width = SystemParameters.VirtualScreenWidth;
         Height = SystemParameters.VirtualScreenHeight;
 
-        Loaded += (_, _) => PlacePanelTopRight();
+        Loaded += (_, _) => PlaceCardsTopRight();
     }
 
-    /// <summary>Places the floating card near the top-right of the primary working area (once).</summary>
-    private void PlacePanelTopRight()
+    /// <summary>
+    /// Places the two floating cards near the top-right of the primary working area (once): the chat
+    /// card on the right, the transcription-staging card immediately to its left.
+    /// </summary>
+    private void PlaceCardsTopRight()
     {
         if (_panelPlaced)
             return;
         _panelPlaced = true;
 
+        const double gap = 12;
         var wa = SystemParameters.WorkArea;
         // WorkArea is in screen coordinates; the canvas origin is the window's top-left.
-        Canvas.SetLeft(PanelCard, wa.Right - PanelCard.Width - 24 - Left);
-        Canvas.SetTop(PanelCard, wa.Top + 24 - Top);
+        double top = wa.Top + 24 - Top;
+        double chatLeft = wa.Right - ChatCard.Width - 24 - Left;
+
+        Canvas.SetLeft(ChatCard, chatLeft);
+        Canvas.SetTop(ChatCard, top);
+        Canvas.SetLeft(StagingCard, chatLeft - StagingCard.Width - gap);
+        Canvas.SetTop(StagingCard, top);
     }
 
     /// <summary>
@@ -273,13 +308,17 @@ public partial class MainWindow : Window
         if (!IsVisible)
             Show();
 
+        // Size the painted arrow to match the real cursor at the current DPI + pointer-size setting.
+        UpdateCursorScale();
+
         // Start the fake cursor where the real pointer currently is.
         Native.NativeCursor.POINT p = Native.NativeCursor.GetPosition();
         _fakeCursor = ClampToCanvas(RootCanvas.PointFromScreen(new Point(p.X, p.Y)));
         MoveFakeCursor();
 
-        _panelDragging = false;
+        _draggingCard = null;
         _pressedButton = null;
+        _selectingTextBox = null;
         _vm.IsInteractive = true;
 
         // Capture input + freeze the real cursor BEFORE we take the foreground, so the
@@ -296,12 +335,16 @@ public partial class MainWindow : Window
             return;
 
         _interactive.Exit();   // releases the cursor clip and restores the previous foreground app
-        _panelDragging = false;
+        _draggingCard = null;
         _pressedButton = null;
+        _selectingTextBox = null;
         _vm.IsInteractive = false;
     }
 
-    /// <summary>Fake cursor moved: integrate the raw delta (px -> DIU) and drag the panel if held.</summary>
+    /// <summary>
+    /// Fake cursor moved: map the raw device delta 1:1 (times the speed multiplier), convert to
+    /// DIU, move the cursor, then drag a card / extend a text selection if one is active.
+    /// </summary>
     private void OnInteractiveMouseMoved(int dxPixels, int dyPixels)
     {
         PresentationSource? src = PresentationSource.FromVisual(this);
@@ -309,14 +352,20 @@ public partial class MainWindow : Window
             return;
 
         Matrix toDiu = src.CompositionTarget.TransformFromDevice;
-        double dx = dxPixels * toDiu.M11;
-        double dy = dyPixels * toDiu.M22;
+        double dx = dxPixels * CursorSpeedMultiplier * toDiu.M11;
+        double dy = dyPixels * CursorSpeedMultiplier * toDiu.M22;
 
         _fakeCursor = ClampToCanvas(new Point(_fakeCursor.X + dx, _fakeCursor.Y + dy));
         MoveFakeCursor();
 
-        if (_panelDragging)
-            MovePanelBy(dx, dy);
+        if (_draggingCard is not null)
+        {
+            MoveCardBy(_draggingCard, dx, dy);
+            return;
+        }
+
+        if (_selectingTextBox is not null)
+            ExtendTextSelection(_selectingTextBox);
     }
 
     private void OnInteractiveButtonPressed(OverlayMouseButton button)
@@ -333,18 +382,32 @@ public partial class MainWindow : Window
         if (_pressedButton is not null)
             return;
 
-        // Give focus to a clicked input control so the keyboard can type into it.
+        // Give focus to a clicked input control so the keyboard can type into it, and — for a text
+        // box — drop the caret at the clicked character and arm drag-to-select.
         Control? input = FindInputControl(hit);
         if (input is not null)
         {
             input.Focus();
             Keyboard.Focus(input);
+            if (input is TextBox textBox)
+            {
+                Point local = RootCanvas.TranslatePoint(_fakeCursor, textBox);
+                int index = textBox.GetCharacterIndexFromPoint(local, snapToText: true);
+                if (index >= 0)
+                {
+                    textBox.CaretIndex = index;
+                    _selectingTextBox = textBox;
+                    _selectionAnchor = index;
+                }
+            }
             return;
         }
 
-        // Otherwise, pressing the title bar starts a drag.
-        if (IsWithin(hit, TitleBar))
-            _panelDragging = true;
+        // Otherwise, pressing a card's title bar starts dragging that card.
+        if (IsWithin(hit, ChatTitleBar))
+            _draggingCard = ChatCard;
+        else if (IsWithin(hit, StagingTitleBar))
+            _draggingCard = StagingCard;
     }
 
     private void OnInteractiveButtonReleased(OverlayMouseButton button)
@@ -352,9 +415,11 @@ public partial class MainWindow : Window
         if (button != OverlayMouseButton.Left)
             return;
 
-        if (_panelDragging)
+        _selectingTextBox = null;
+
+        if (_draggingCard is not null)
         {
-            _panelDragging = false;
+            _draggingCard = null;
             return;
         }
 
@@ -368,36 +433,91 @@ public partial class MainWindow : Window
         _pressedButton = null;
     }
 
+    /// <summary>
+    /// Routes a wheel notch to whatever is under the fake cursor by raising a real
+    /// <see cref="UIElement.MouseWheelEvent"/>, so nested scroll viewers, list boxes and combo
+    /// popups all scroll exactly as they would under the real pointer. If nothing in the route
+    /// handled it, fall back to nudging the nearest <see cref="ScrollViewer"/> directly.
+    /// </summary>
     private void OnInteractiveWheel(int delta)
     {
         DependencyObject? hit = HitTest(_fakeCursor);
-        ScrollViewer? scroller = hit is null ? null : FindAncestor<ScrollViewer>(hit);
+        if (hit is null || FindAncestor<UIElement>(hit) is not UIElement target)
+            return;
+
+        var args = new MouseWheelEventArgs(Mouse.PrimaryDevice, Environment.TickCount, delta)
+        {
+            RoutedEvent = UIElement.MouseWheelEvent,
+            Source = target,
+        };
+        target.RaiseEvent(args);
+
         // One wheel notch is 120 units; scroll ~48 DIU per notch, wheel-up scrolls up.
-        scroller?.ScrollToVerticalOffset(scroller.VerticalOffset - delta / 120.0 * 48.0);
+        if (!args.Handled && FindAncestor<ScrollViewer>(hit) is ScrollViewer scroller)
+            scroller.ScrollToVerticalOffset(scroller.VerticalOffset - delta / 120.0 * 48.0);
     }
 
     // ---- Fake-cursor helpers --------------------------------------------------------------
 
     private void MoveFakeCursor()
     {
+        // The arrow's tip is authored at (0,0), so the translate is simply the cursor position.
         FakeCursorTransform.X = _fakeCursor.X;
         FakeCursorTransform.Y = _fakeCursor.Y;
+    }
+
+    // Scales the vector arrow to match the real cursor's on-screen size. The real cursor's physical
+    // size is the pointer-size base size (logical, from the registry) times the monitor DPI scale
+    // (Windows applies this at draw time; the base size alone omits it). The arrow is authored for a
+    // 32px cursor and drawn in this window's DIU, which the window renders to physical pixels at its
+    // composition scale, so:
+    //   scale = realPhysical / 32 / windowScale = baseSize * monitorScale / (32 * windowScale)
+    // With the size knob at 1.0 this equals the real cursor's size. (monitorScale and windowScale
+    // are equal on a single monitor under per-monitor-v2 awareness, so DPI is applied exactly once.)
+    private void UpdateCursorScale()
+    {
+        PresentationSource? src = PresentationSource.FromVisual(this);
+        double windowScale = src?.CompositionTarget?.TransformToDevice.M11 ?? 1.0;
+        if (windowScale <= 0) windowScale = 1.0;
+
+        IntPtr hwnd = new WindowInteropHelper(this).Handle;
+        double monitorScale = NativePointer.GetWindowDpiScale(hwnd);
+        int baseSize = NativePointer.GetCursorBaseSize();
+
+        double scale = baseSize * monitorScale / (32.0 * windowScale) * CursorSizeScale;
+        FakeCursorScale.ScaleX = scale;
+        FakeCursorScale.ScaleY = scale;
+
+        // Diagnostic: surfaces the real numbers in the Logs panel so cursor sizing can be verified.
+        Services.Logging.Log.Info(
+            $"Cursor scale: windowScale={windowScale:0.##} monitorDpiScale={monitorScale:0.##} " +
+            $"baseSize={baseSize} sizeKnob={CursorSizeScale:0.##} -> scale={scale:0.###}", "Cursor");
+    }
+
+    // Extends the active text-box selection from the press anchor to the character under the cursor.
+    private void ExtendTextSelection(TextBox textBox)
+    {
+        Point local = RootCanvas.TranslatePoint(_fakeCursor, textBox);
+        int index = textBox.GetCharacterIndexFromPoint(local, snapToText: true);
+        if (index < 0)
+            return;
+        textBox.Select(Math.Min(_selectionAnchor, index), Math.Abs(index - _selectionAnchor));
     }
 
     private Point ClampToCanvas(Point p) => new(
         Math.Clamp(p.X, 0, Math.Max(0, RootCanvas.ActualWidth)),
         Math.Clamp(p.Y, 0, Math.Max(0, RootCanvas.ActualHeight)));
 
-    private void MovePanelBy(double dx, double dy)
+    private void MoveCardBy(Border card, double dx, double dy)
     {
         // Keep a sliver of the card on-screen so it can never be lost off an edge.
         const double margin = 60;
-        double left = Math.Clamp(Canvas.GetLeft(PanelCard) + dx,
-            -(PanelCard.ActualWidth - margin), Math.Max(0, RootCanvas.ActualWidth - margin));
-        double top = Math.Clamp(Canvas.GetTop(PanelCard) + dy,
+        double left = Math.Clamp(Canvas.GetLeft(card) + dx,
+            -(card.ActualWidth - margin), Math.Max(0, RootCanvas.ActualWidth - margin));
+        double top = Math.Clamp(Canvas.GetTop(card) + dy,
             0, Math.Max(0, RootCanvas.ActualHeight - margin));
-        Canvas.SetLeft(PanelCard, left);
-        Canvas.SetTop(PanelCard, top);
+        Canvas.SetLeft(card, left);
+        Canvas.SetTop(card, top);
     }
 
     /// <summary>Hit-tests the visual tree at a RootCanvas point; returns the top-most hit visual.</summary>
@@ -520,15 +640,6 @@ public partial class MainWindow : Window
     }
 
     private void Close_Click(object sender, RoutedEventArgs e) => Close();
-
-    private void Input_KeyDown(object sender, KeyEventArgs e)
-    {
-        if (e.Key == Key.Enter && _vm.Chat.SendCommand.CanExecute(null))
-        {
-            _vm.Chat.SendCommand.Execute(null);
-            e.Handled = true;
-        }
-    }
 
     private void SaveSettings_Click(object sender, RoutedEventArgs e)
     {

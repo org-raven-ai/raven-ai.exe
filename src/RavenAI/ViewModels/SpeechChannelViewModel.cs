@@ -46,6 +46,15 @@ public sealed partial class SpeechChannelViewModel : ObservableObject, IDisposab
     /// <summary>Only the microphone channel exposes a device picker; system audio has no device to choose.</summary>
     public bool SupportsDeviceSelection => _source == AudioInputSource.Microphone;
 
+    /// <summary>True for the microphone channel (the interviewee, "You"); false for system audio.</summary>
+    public bool IsMicrophone => _source == AudioInputSource.Microphone;
+
+    /// <summary>
+    /// Raised on the UI thread when the recognizer commits a final phrase — i.e. a live interim
+    /// line has become a settled statement. The staging window listens to this to append a message.
+    /// </summary>
+    public event Action<string>? FinalCommitted;
+
     // ---- Microphone device picker (microphone channel only) ----------------------------
 
     /// <summary>Available microphones (default entry first). Populated at startup and on refresh.</summary>
@@ -115,6 +124,7 @@ public sealed partial class SpeechChannelViewModel : ObservableObject, IDisposab
         _final.AppendLine(text);
         InterimText = string.Empty;
         FinalTranscript = _final.ToString();
+        FinalCommitted?.Invoke(text);
     });
 
     private void OnError(string message)

@@ -17,7 +17,6 @@ public sealed partial class MainViewModel : ObservableObject
     public LogViewModel Log { get; }
 
     [ObservableProperty] private bool _isSettingsOpen;
-    [ObservableProperty] private bool _isSpeechOpen;
     [ObservableProperty] private bool _isLogOpen;
 
     /// <summary>
@@ -35,8 +34,8 @@ public sealed partial class MainViewModel : ObservableObject
     /// <summary>True when a warning banner should be shown (protection missing or degraded).</summary>
     public bool ShowProtectionWarning => !IsProtected || !IsFullyHidden;
 
-    /// <summary>True when the chat surface is visible (no overlay open).</summary>
-    public bool IsChatOpen => !IsSettingsOpen && !IsSpeechOpen && !IsLogOpen;
+    /// <summary>True when the chat messages are visible (neither Settings nor Logs overlay is open).</summary>
+    public bool IsChatOpen => !IsSettingsOpen && !IsLogOpen;
 
     public MainViewModel(ChatViewModel chat, SettingsViewModel settings, SpeechViewModel speech, LogViewModel log)
     {
@@ -45,6 +44,15 @@ public sealed partial class MainViewModel : ObservableObject
         Speech = speech;
         Log = log;
         Settings.Saved += () => IsSettingsOpen = false;
+
+        // The staging window's Send button routes its batched transcript into the chat. Close any
+        // Settings/Logs overlay first so the streaming reply is visible in the chat card.
+        Speech.SendToChat = async text =>
+        {
+            IsSettingsOpen = false;
+            IsLogOpen = false;
+            await Chat.SubmitExternalAsync(text);
+        };
     }
 
     /// <summary>Called by the window once protection has been applied and verified.</summary>
@@ -63,27 +71,19 @@ public sealed partial class MainViewModel : ObservableObject
         OnPropertyChanged(nameof(IsChatOpen));
         if (value) Settings.EnsureModelsLoaded(); // populate the model dropdowns on first open
     }
-    partial void OnIsSpeechOpenChanged(bool value) => OnPropertyChanged(nameof(IsChatOpen));
     partial void OnIsLogOpenChanged(bool value) => OnPropertyChanged(nameof(IsChatOpen));
 
     [RelayCommand]
     private void ToggleSettings()
     {
         IsSettingsOpen = !IsSettingsOpen;
-        if (IsSettingsOpen) { IsSpeechOpen = false; IsLogOpen = false; } // panes are mutually exclusive
-    }
-
-    [RelayCommand]
-    private void ToggleSpeech()
-    {
-        IsSpeechOpen = !IsSpeechOpen;
-        if (IsSpeechOpen) { IsSettingsOpen = false; IsLogOpen = false; } // panes are mutually exclusive
+        if (IsSettingsOpen) IsLogOpen = false; // the two overlays are mutually exclusive
     }
 
     [RelayCommand]
     private void ToggleLog()
     {
         IsLogOpen = !IsLogOpen;
-        if (IsLogOpen) { IsSettingsOpen = false; IsSpeechOpen = false; } // panes are mutually exclusive
+        if (IsLogOpen) IsSettingsOpen = false; // the two overlays are mutually exclusive
     }
 }

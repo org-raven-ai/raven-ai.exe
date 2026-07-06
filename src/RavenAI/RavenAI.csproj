@@ -30,6 +30,26 @@
     <DebugType Condition="'$(PublishSingleExe)' == 'true'">none</DebugType>
   </PropertyGroup>
 
+  <!-- Stamp the git commit + build time into assembly metadata so the exact running build is
+       identifiable in-app (Settings "Build" line + the startup log). Never fails the build. -->
+  <Target Name="StampBuildInfo" BeforeTargets="GetAssemblyAttributes">
+    <!-- Match a nonexistent tag so describe falls back to a plain short SHA (plus a dirty flag)
+         instead of the verbose tag/count/sha form. -->
+    <Exec Command="git describe --always --dirty --abbrev=8 --match=__no_tag__"
+          ConsoleToMSBuild="true" ContinueOnError="true" StandardOutputImportance="low"
+          WorkingDirectory="$(MSBuildProjectDirectory)">
+      <Output TaskParameter="ConsoleOutput" PropertyName="GitCommit" />
+    </Exec>
+    <PropertyGroup>
+      <GitCommit Condition="'$(GitCommit)' == ''">unknown</GitCommit>
+      <BuildTimeUtc>$([System.DateTime]::UtcNow.ToString("yyyy-MM-dd HH:mm:ss'Z'"))</BuildTimeUtc>
+    </PropertyGroup>
+    <ItemGroup>
+      <AssemblyMetadata Include="GitCommit" Value="$(GitCommit)" />
+      <AssemblyMetadata Include="BuildTimeUtc" Value="$(BuildTimeUtc)" />
+    </ItemGroup>
+  </Target>
+
   <ItemGroup>
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.3.2" />
     <PackageReference Include="Microsoft.CognitiveServices.Speech" Version="1.50.0" />
