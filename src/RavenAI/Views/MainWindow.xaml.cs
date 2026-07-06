@@ -7,7 +7,9 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using System.Windows.Threading;
+using RavenAI.Native;
 using RavenAI.Services;
 using RavenAI.Services.Overlay;
 using RavenAI.Services.Voice;
@@ -19,6 +21,7 @@ using ButtonBase = System.Windows.Controls.Primitives.ButtonBase;
 using TextBoxBase = System.Windows.Controls.Primitives.TextBoxBase;
 using Control = System.Windows.Controls.Control;
 using ComboBox = System.Windows.Controls.ComboBox;
+using TextBox = System.Windows.Controls.TextBox;
 
 namespace RavenAI.Views;
 
@@ -48,6 +51,21 @@ public partial class MainWindow : Window
     private Border? _draggingCard;
     // The button pressed by the fake cursor, invoked on release if still under the cursor.
     private ButtonBase? _pressedButton;
+
+    // Fake-cursor rendering: the real OS cursor bitmaps (arrow / I-beam / hand) with their
+    // hot-spots (in DIU), plus which one is currently shown.
+    private readonly Dictionary<SystemCursorKind, (BitmapSource Image, Point Hotspot)> _cursorImages = new();
+    private SystemCursorKind _cursorKind = SystemCursorKind.Arrow;
+    private Point _cursorHotspot;
+
+    // Pointer ballistics captured from the OS on enter, so the fake cursor moves like the real one:
+    // the pointer-speed slider as a linear factor, and whether acceleration ("enhance precision") is on.
+    private double _pointerSpeedFactor = 1.0;
+    private bool _enhancePointerPrecision;
+
+    // Drag-to-select state while the fake cursor holds the button down over a text box.
+    private TextBox? _selectingTextBox;
+    private int _selectionAnchor;
 
     // Virtual-key codes for the hotkeys.
     private const uint VK_SPACE = 0x20;
@@ -289,13 +307,20 @@ public partial class MainWindow : Window
         if (!IsVisible)
             Show();
 
-        // Start the fake cursor where the real pointer currently is.
+        // Match the fake cursor's movement to how Windows would move the real one: read the
+        // pointer-speed slider (1..20; 10 = 1:1) and whether acceleration is enabled.
+        _pointerSpeedFactor = PointerSpeedToFactor(NativePointer.GetPointerSpeed());
+        _enhancePointerPrecision = NativePointer.IsEnhancePointerPrecisionOn();
+
+        // Start the fake cursor where the real pointer currently is, showing the arrow.
         Native.NativeCursor.POINT p = Native.NativeCursor.GetPosition();
         _fakeCursor = ClampToCanvas(RootCanvas.PointFromScreen(new Point(p.X, p.Y)));
+        SetCursorKind(SystemCursorKind.Arrow);
         MoveFakeCursor();
 
         _draggingCard = null;
         _pressedButton = null;
+        _selectingTextBox = null;
         _vm.IsInteractive = true;
 
         // Capture input + freeze the real cursor BEFORE we take the foreground, so the
@@ -314,25 +339,49 @@ public partial class MainWindow : Window
         _interactive.Exit();   // releases the cursor clip and restores the previous foreground app
         _draggingCard = null;
         _pressedButton = null;
+        _selectingTextBox = null;
         _vm.IsInteractive = false;
     }
 
-    /// <summary>Fake cursor moved: integrate the raw delta (px -> DIU) and drag the panel if held.</summary>
+    /// <summary>
+    /// Fake cursor moved: scale the raw device delta to match the OS pointer speed/acceleration,
+    /// convert to DIU, move the cursor, then drag a card / extend a text selection if one is active.
+    /// </summary>
     private void OnInteractiveMouseMoved(int dxPixels, int dyPixels)
     {
         PresentationSource? src = PresentationSource.FromVisual(this);
         if (src?.CompositionTarget is null)
             return;
 
+        // Apply the pointer-speed factor and (if enabled) a mild acceleration for fast motion, so
+        // the fake cursor covers the same on-screen distance the real pointer would have.
+        double gain = _pointerSpeedFactor;
+        if (_enhancePointerPrecision)
+        {
+            double speed = Math.Sqrt((double)dxPixels * dxPixels + (double)dyPixels * dyPixels);
+            gain *= 1.0 + Math.Min(speed / 8.0, 1.0); // ~1x when slow, up to ~2x on a fast flick
+        }
+
         Matrix toDiu = src.CompositionTarget.TransformFromDevice;
-        double dx = dxPixels * toDiu.M11;
-        double dy = dyPixels * toDiu.M22;
+        double dx = dxPixels * gain * toDiu.M11;
+        double dy = dyPixels * gain * toDiu.M22;
 
         _fakeCursor = ClampToCanvas(new Point(_fakeCursor.X + dx, _fakeCursor.Y + dy));
         MoveFakeCursor();
 
         if (_draggingCard is not null)
+        {
             MoveCardBy(_draggingCard, dx, dy);
+            return;
+        }
+
+        if (_selectingTextBox is not null)
+        {
+            ExtendTextSelection(_selectingTextBox);
+            return;
+        }
+
+        UpdateHoverCursor();
     }
 
     private void OnInteractiveButtonPressed(OverlayMouseButton button)
@@ -349,12 +398,24 @@ public partial class MainWindow : Window
         if (_pressedButton is not null)
             return;
 
-        // Give focus to a clicked input control so the keyboard can type into it.
+        // Give focus to a clicked input control so the keyboard can type into it, and — for a text
+        // box — drop the caret at the clicked character and arm drag-to-select.
         Control? input = FindInputControl(hit);
         if (input is not null)
         {
             input.Focus();
             Keyboard.Focus(input);
+            if (input is TextBox textBox)
+            {
+                Point local = RootCanvas.TranslatePoint(_fakeCursor, textBox);
+                int index = textBox.GetCharacterIndexFromPoint(local, snapToText: true);
+                if (index >= 0)
+                {
+                    textBox.CaretIndex = index;
+                    _selectingTextBox = textBox;
+                    _selectionAnchor = index;
+                }
+            }
             return;
         }
 
@@ -369,6 +430,8 @@ public partial class MainWindow : Window
     {
         if (button != OverlayMouseButton.Left)
             return;
+
+        _selectingTextBox = null;
 
         if (_draggingCard is not null)
         {
@@ -386,20 +449,108 @@ public partial class MainWindow : Window
         _pressedButton = null;
     }
 
+    /// <summary>
+    /// Routes a wheel notch to whatever is under the fake cursor by raising a real
+    /// <see cref="UIElement.MouseWheelEvent"/>, so nested scroll viewers, list boxes and combo
+    /// popups all scroll exactly as they would under the real pointer. If nothing in the route
+    /// handled it, fall back to nudging the nearest <see cref="ScrollViewer"/> directly.
+    /// </summary>
     private void OnInteractiveWheel(int delta)
     {
         DependencyObject? hit = HitTest(_fakeCursor);
-        ScrollViewer? scroller = hit is null ? null : FindAncestor<ScrollViewer>(hit);
+        if (hit is null || FindAncestor<UIElement>(hit) is not UIElement target)
+            return;
+
+        var args = new MouseWheelEventArgs(Mouse.PrimaryDevice, Environment.TickCount, delta)
+        {
+            RoutedEvent = UIElement.MouseWheelEvent,
+            Source = target,
+        };
+        target.RaiseEvent(args);
+
         // One wheel notch is 120 units; scroll ~48 DIU per notch, wheel-up scrolls up.
-        scroller?.ScrollToVerticalOffset(scroller.VerticalOffset - delta / 120.0 * 48.0);
+        if (!args.Handled && FindAncestor<ScrollViewer>(hit) is ScrollViewer scroller)
+            scroller.ScrollToVerticalOffset(scroller.VerticalOffset - delta / 120.0 * 48.0);
     }
 
     // ---- Fake-cursor helpers --------------------------------------------------------------
 
     private void MoveFakeCursor()
     {
-        FakeCursorTransform.X = _fakeCursor.X;
-        FakeCursorTransform.Y = _fakeCursor.Y;
+        // Offset by the cursor's hot-spot so the "point" of the arrow (or the I-beam's centre)
+        // lands exactly on the fake-cursor position, like the real cursor.
+        FakeCursorTransform.X = _fakeCursor.X - _cursorHotspot.X;
+        FakeCursorTransform.Y = _fakeCursor.Y - _cursorHotspot.Y;
+    }
+
+    /// <summary>Picks arrow / I-beam / hand based on what the fake cursor is hovering, like the OS.</summary>
+    private void UpdateHoverCursor()
+    {
+        DependencyObject? hit = HitTest(_fakeCursor);
+        SystemCursorKind kind = SystemCursorKind.Arrow;
+        if (hit is not null)
+        {
+            if (FindAncestor<TextBoxBase>(hit) is not null)
+                kind = SystemCursorKind.IBeam;
+            else if (FindAncestor<ButtonBase>(hit) is not null)
+                kind = SystemCursorKind.Hand;
+        }
+        SetCursorKind(kind);
+    }
+
+    /// <summary>Swaps the painted cursor bitmap (and its hot-spot) to the given kind.</summary>
+    private void SetCursorKind(SystemCursorKind kind)
+    {
+        if (_cursorKind == kind && FakeCursorImage.Source is not null)
+            return;
+
+        (BitmapSource Image, Point Hotspot) entry = GetCursorImage(kind);
+        _cursorKind = kind;
+        _cursorHotspot = entry.Hotspot;
+        FakeCursorImage.Source = entry.Image;
+        MoveFakeCursor();
+    }
+
+    // Loads (once, then caches) the real OS cursor bitmap + hot-spot for a kind. The bitmap comes
+    // back at 96 DPI, so its pixel size equals its DIU size and the pixel hot-spot equals the DIU
+    // hot-spot; WPF then scales it with the screen DPI just like the real cursor.
+    private (BitmapSource Image, Point Hotspot) GetCursorImage(SystemCursorKind kind)
+    {
+        if (_cursorImages.TryGetValue(kind, out var cached))
+            return cached;
+
+        IntPtr handle = NativePointer.LoadSystemCursor(kind);
+        (int hx, int hy) = NativePointer.GetHotspot(handle);
+        BitmapSource image = Imaging.CreateBitmapSourceFromHIcon(
+            handle, Int32Rect.Empty, BitmapSizeOptions.FromEmptyOptions());
+        image.Freeze();
+
+        var entry = (image, new Point(hx, hy));
+        _cursorImages[kind] = entry;
+        return entry;
+    }
+
+    // Extends the active text-box selection from the press anchor to the character under the cursor.
+    private void ExtendTextSelection(TextBox textBox)
+    {
+        Point local = RootCanvas.TranslatePoint(_fakeCursor, textBox);
+        int index = textBox.GetCharacterIndexFromPoint(local, snapToText: true);
+        if (index < 0)
+            return;
+        textBox.Select(Math.Min(_selectionAnchor, index), Math.Abs(index - _selectionAnchor));
+    }
+
+    // Maps the Windows pointer-speed slider (1..20, 10 = default) to a linear movement multiplier,
+    // using the documented sensitivity table (10 -> 1.0, each step ~1/8, with a finer low end).
+    private static double PointerSpeedToFactor(int speed)
+    {
+        double[] table =
+        {
+            1 / 32.0, 1 / 16.0, 1 / 8.0, 2 / 8.0, 3 / 8.0, 4 / 8.0, 5 / 8.0, 6 / 8.0, 7 / 8.0,
+            8 / 8.0, 9 / 8.0, 10 / 8.0, 11 / 8.0, 12 / 8.0, 13 / 8.0, 14 / 8.0, 15 / 8.0, 16 / 8.0,
+            17 / 8.0, 18 / 8.0,
+        };
+        return table[Math.Clamp(speed, 1, 20) - 1];
     }
 
     private Point ClampToCanvas(Point p) => new(
