@@ -58,8 +58,11 @@ public partial class MainWindow : Window
     private readonly Dictionary<SystemCursorKind, (BitmapSource Image, Point Hotspot)> _cursorImages = new();
     private SystemCursorKind _cursorKind = SystemCursorKind.Arrow;
     private Point _cursorHotspot;
-    private double _dpiScale = 1.0;      // device pixels per DIU
-    private int _targetCursorPx = 32;    // real on-screen cursor size in physical pixels
+    private double _windowScale = 1.0;   // this window's device pixels per DIU (WPF composition)
+    private int _targetCursorPx = 32;    // fake-cursor bitmap size in physical pixels
+
+    // Fine-tune the fake cursor's size relative to the real one: 1.0 = exact match, lower = smaller.
+    private const double CursorSizeScale = 0.9;
 
     // Movement multiplier for the fake cursor: 1.0 maps the raw device delta 1:1; lower is slower,
     // higher is faster. Tuned to 0.8 so it tracks a bit slower than raw, closer to the real pointer.
@@ -504,20 +507,30 @@ public partial class MainWindow : Window
         MoveFakeCursor();
     }
 
-    // Captures the current DPI and real cursor pixel size, sizes the cursor Image so its bitmaps
-    // render at exactly the real physical size, and clears the cache so bitmaps rebuild at that size.
+    // Sizes the cursor Image to match the real on-screen cursor, then clears the cache so the
+    // bitmaps rebuild at that size. The real cursor's physical size is its bitmap size (which
+    // reflects the pointer-size accessibility setting) times the monitor DPI scale (which Windows
+    // applies at draw time and the bitmap size alone does NOT capture). We then convert that
+    // physical size to this window's DIU using its own composition scale, so it renders 1:1 whether
+    // or not the overlay itself is DPI-scaled.
     private void PrepareCursorSizing()
     {
         PresentationSource? src = PresentationSource.FromVisual(this);
-        _dpiScale = src?.CompositionTarget?.TransformToDevice.M11 ?? 1.0;
-        if (_dpiScale <= 0) _dpiScale = 1.0;
+        _windowScale = src?.CompositionTarget?.TransformToDevice.M11 ?? 1.0;
+        if (_windowScale <= 0) _windowScale = 1.0;
 
-        int measured = NativePointer.GetCurrentCursorSize();
-        _targetCursorPx = measured > 0 ? measured : (int)Math.Round(32 * _dpiScale);
+        IntPtr hwnd = new WindowInteropHelper(this).Handle;
+        double monitorScale = NativePointer.GetWindowDpiScale(hwnd);
 
-        // The bitmap is _targetCursorPx physical px; drawn at that many DIU / _dpiScale it occupies
-        // exactly _targetCursorPx device px on screen — the same size as the real cursor.
-        double sizeDiu = _targetCursorPx / _dpiScale;
+        int bitmapPx = NativePointer.GetCurrentCursorSize();
+        if (bitmapPx <= 0) bitmapPx = 32;
+
+        double physicalPx = bitmapPx * monitorScale * CursorSizeScale;
+        _targetCursorPx = Math.Max(8, (int)Math.Round(physicalPx));
+
+        // Drawn at (physical px / window composition scale) DIU, the bitmap occupies that many
+        // device px on screen — matching the real cursor.
+        double sizeDiu = _targetCursorPx / _windowScale;
         FakeCursorImage.Width = sizeDiu;
         FakeCursorImage.Height = sizeDiu;
 
@@ -527,8 +540,8 @@ public partial class MainWindow : Window
     }
 
     // Loads (once per size, then caches) the real OS cursor bitmap + hot-spot for a kind, at the
-    // measured cursor size. The hot-spot is returned in the bitmap's physical pixels, converted to
-    // DIU (÷ DPI) so it lines up with the DIU-positioned image.
+    // target cursor size. The hot-spot is returned in the bitmap's physical pixels, converted to
+    // DIU (÷ the window composition scale) so it lines up with the DIU-positioned image.
     private (BitmapSource Image, Point Hotspot) GetCursorImage(SystemCursorKind kind)
     {
         if (_cursorImages.TryGetValue(kind, out var cached))
@@ -540,7 +553,7 @@ public partial class MainWindow : Window
             handle, Int32Rect.Empty, BitmapSizeOptions.FromEmptyOptions());
         image.Freeze();
 
-        var entry = (image, new Point(hx / _dpiScale, hy / _dpiScale));
+        var entry = (image, new Point(hx / _windowScale, hy / _windowScale));
         _cursorImages[kind] = entry;
         return entry;
     }

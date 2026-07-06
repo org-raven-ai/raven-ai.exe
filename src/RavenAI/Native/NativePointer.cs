@@ -73,6 +73,9 @@ internal static class NativePointer
     [DllImport("gdi32.dll")]
     private static extern int GetObject(IntPtr h, int c, ref BITMAP pv);
 
+    [DllImport("user32.dll")]
+    private static extern uint GetDpiForWindow(IntPtr hwnd);
+
     [DllImport("gdi32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool DeleteObject(IntPtr hObject);
@@ -99,6 +102,17 @@ internal static class NativePointer
                 return scaled;
         }
         return LoadCursor(IntPtr.Zero, (IntPtr)id);
+    }
+
+    /// <summary>
+    /// The DPI scale (1.0 = 96 DPI, 1.5 = 150%) of the monitor the window is on. This is the factor
+    /// by which Windows enlarges the base cursor at draw time, which the cursor bitmap size alone
+    /// does not reflect. Falls back to 1.0.
+    /// </summary>
+    public static double GetWindowDpiScale(IntPtr hwnd)
+    {
+        uint dpi = hwnd == IntPtr.Zero ? 0 : GetDpiForWindow(hwnd);
+        return dpi > 0 ? dpi / 96.0 : 1.0;
     }
 
     /// <summary>The cursor's hot-spot (the pixel that is "the point") in cursor-bitmap pixels.</summary>
