@@ -58,9 +58,9 @@ public partial class MainWindow : Window
     private SystemCursorKind _cursorKind = SystemCursorKind.Arrow;
     private Point _cursorHotspot;
 
-    // Movement multiplier for the fake cursor: 1.0 maps the raw device delta 1:1 (matching the OS
-    // pointer at default speed). Raise it to make the cursor travel faster per unit of hand motion.
-    private const double CursorSpeedMultiplier = 1.0;
+    // Movement multiplier for the fake cursor: 1.0 maps the raw device delta 1:1; lower is slower,
+    // higher is faster. Tuned to 0.8 so it tracks a bit slower than raw, closer to the real pointer.
+    private const double CursorSpeedMultiplier = 0.8;
 
     // Drag-to-select state while the fake cursor holds the button down over a text box.
     private TextBox? _selectingTextBox;
