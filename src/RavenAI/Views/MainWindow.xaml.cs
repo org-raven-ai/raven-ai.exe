@@ -58,10 +58,9 @@ public partial class MainWindow : Window
     private SystemCursorKind _cursorKind = SystemCursorKind.Arrow;
     private Point _cursorHotspot;
 
-    // Pointer ballistics captured from the OS on enter, so the fake cursor moves like the real one:
-    // the pointer-speed slider as a linear factor, and whether acceleration ("enhance precision") is on.
-    private double _pointerSpeedFactor = 1.0;
-    private bool _enhancePointerPrecision;
+    // Movement multiplier for the fake cursor: 1.0 maps the raw device delta 1:1 (matching the OS
+    // pointer at default speed). Raise it to make the cursor travel faster per unit of hand motion.
+    private const double CursorSpeedMultiplier = 1.0;
 
     // Drag-to-select state while the fake cursor holds the button down over a text box.
     private TextBox? _selectingTextBox;
@@ -307,11 +306,6 @@ public partial class MainWindow : Window
         if (!IsVisible)
             Show();
 
-        // Match the fake cursor's movement to how Windows would move the real one: read the
-        // pointer-speed slider (1..20; 10 = 1:1) and whether acceleration is enabled.
-        _pointerSpeedFactor = PointerSpeedToFactor(NativePointer.GetPointerSpeed());
-        _enhancePointerPrecision = NativePointer.IsEnhancePointerPrecisionOn();
-
         // Start the fake cursor where the real pointer currently is, showing the arrow.
         Native.NativeCursor.POINT p = Native.NativeCursor.GetPosition();
         _fakeCursor = ClampToCanvas(RootCanvas.PointFromScreen(new Point(p.X, p.Y)));
@@ -344,8 +338,8 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// Fake cursor moved: scale the raw device delta to match the OS pointer speed/acceleration,
-    /// convert to DIU, move the cursor, then drag a card / extend a text selection if one is active.
+    /// Fake cursor moved: map the raw device delta 1:1 (times the speed multiplier), convert to
+    /// DIU, move the cursor, then drag a card / extend a text selection if one is active.
     /// </summary>
     private void OnInteractiveMouseMoved(int dxPixels, int dyPixels)
     {
@@ -353,18 +347,9 @@ public partial class MainWindow : Window
         if (src?.CompositionTarget is null)
             return;
 
-        // Apply the pointer-speed factor and (if enabled) a mild acceleration for fast motion, so
-        // the fake cursor covers the same on-screen distance the real pointer would have.
-        double gain = _pointerSpeedFactor;
-        if (_enhancePointerPrecision)
-        {
-            double speed = Math.Sqrt((double)dxPixels * dxPixels + (double)dyPixels * dyPixels);
-            gain *= 1.0 + Math.Min(speed / 8.0, 1.0); // ~1x when slow, up to ~2x on a fast flick
-        }
-
         Matrix toDiu = src.CompositionTarget.TransformFromDevice;
-        double dx = dxPixels * gain * toDiu.M11;
-        double dy = dyPixels * gain * toDiu.M22;
+        double dx = dxPixels * CursorSpeedMultiplier * toDiu.M11;
+        double dy = dyPixels * CursorSpeedMultiplier * toDiu.M22;
 
         _fakeCursor = ClampToCanvas(new Point(_fakeCursor.X + dx, _fakeCursor.Y + dy));
         MoveFakeCursor();
@@ -538,19 +523,6 @@ public partial class MainWindow : Window
         if (index < 0)
             return;
         textBox.Select(Math.Min(_selectionAnchor, index), Math.Abs(index - _selectionAnchor));
-    }
-
-    // Maps the Windows pointer-speed slider (1..20, 10 = default) to a linear movement multiplier,
-    // using the documented sensitivity table (10 -> 1.0, each step ~1/8, with a finer low end).
-    private static double PointerSpeedToFactor(int speed)
-    {
-        double[] table =
-        {
-            1 / 32.0, 1 / 16.0, 1 / 8.0, 2 / 8.0, 3 / 8.0, 4 / 8.0, 5 / 8.0, 6 / 8.0, 7 / 8.0,
-            8 / 8.0, 9 / 8.0, 10 / 8.0, 11 / 8.0, 12 / 8.0, 13 / 8.0, 14 / 8.0, 15 / 8.0, 16 / 8.0,
-            17 / 8.0, 18 / 8.0,
-        };
-        return table[Math.Clamp(speed, 1, 20) - 1];
     }
 
     private Point ClampToCanvas(Point p) => new(
