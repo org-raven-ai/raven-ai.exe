@@ -13,22 +13,184 @@
     <!-- This window is a full-virtual-screen transparent overlay. It is kept click-through
          (WS_EX_TRANSPARENT) at ALL times: in pass-through mode every click/key falls to the app
          underneath, and in interactive mode a low-level mouse hook captures input and drives a
-         painted fake cursor that does its own hit-testing against the floating panel below.
+         painted fake cursor that does its own hit-testing against the floating panels below.
          AllowsTransparency stays True (a per-pixel WS_EX_LAYERED window) so the empty regions are
          genuinely transparent; SetWindowDisplayAffinity(WDA_EXCLUDEFROMCAPTURE) still hides it
          from captures on the app's target OS (verified at runtime; the watchdog + banner are the
-         safety net). Bounds are set to VirtualScreen in code-behind. -->
+         safety net). Bounds are set to VirtualScreen in code-behind.
+
+         Two draggable cards sit side by side on RootCanvas: the transcription-staging window (left)
+         and the agent chat window (right). Both share this single overlay HWND, so both inherit the
+         capture exclusion and are clickable by the fake cursor in interactive mode. -->
 
     <Grid>
         <!-- Faint dim while interactive, so it's obvious input is being captured. Never hit-tested. -->
         <Rectangle Fill="#18000000" IsHitTestVisible="False"
                    Visibility="{Binding IsInteractive, Converter={StaticResource BoolToVisibility}}" />
 
-        <!-- Absolute-positioned layer for the draggable floating panel. -->
+        <!-- Absolute-positioned layer for the draggable floating cards. -->
         <Canvas x:Name="RootCanvas" Background="Transparent">
 
-            <!-- ===== Floating panel card (drag its title bar to move) ===== -->
-            <Border x:Name="PanelCard" Width="420" Height="560"
+            <!-- ============================================================================= -->
+            <!-- ===== Transcription-staging card (left; drag its title bar to move) ========= -->
+            <!-- ============================================================================= -->
+            <!-- Two live channels (system audio → left, microphone → right) transcribe in parallel.
+                 Interim hypotheses show as italic "live" bubbles; once a phrase is committed it
+                 settles into a timestamped message. Send flushes every staged message into the
+                 agent chat and empties this window. -->
+            <Border x:Name="StagingCard" Width="400" Height="560"
+                    Background="{StaticResource WindowBg}" CornerRadius="10"
+                    BorderBrush="#3A3A40" BorderThickness="1" DataContext="{Binding Speech}">
+                <Border.Effect>
+                    <DropShadowEffect Color="Black" BlurRadius="18" ShadowDepth="0" Opacity="0.5" />
+                </Border.Effect>
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />  <!-- title bar -->
+                        <RowDefinition Height="Auto" />  <!-- channel controls -->
+                        <RowDefinition Height="*" />     <!-- staged messages -->
+                        <RowDefinition Height="Auto" />  <!-- live (interim) bubbles -->
+                        <RowDefinition Height="Auto" />  <!-- send / clear -->
+                    </Grid.RowDefinitions>
+
+                    <!-- Title bar (drag to move via the fake cursor while interactive) -->
+                    <Border x:Name="StagingTitleBar" Grid.Row="0" Background="{StaticResource PanelBg}"
+                            CornerRadius="10,10,0,0">
+                        <TextBlock Text="🎙 Transcription" FontWeight="Bold" FontSize="14" Margin="12,8"
+                                   Foreground="{StaticResource TextBrush}" />
+                    </Border>
+
+                    <!-- Channel controls: start/stop each channel + choose the microphone. -->
+                    <StackPanel Grid.Row="1" Margin="12,10,12,4">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="8" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+
+                            <!-- System-audio (Interviewer) start/stop + status -->
+                            <StackPanel Grid.Column="0">
+                                <Button Command="{Binding Interviewer.ToggleCommand}" FontWeight="Bold" HorizontalAlignment="Stretch">
+                                    <Button.Style>
+                                        <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+                                            <Setter Property="Content" Value="▶ System audio" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding Interviewer.IsListening}" Value="True">
+                                                    <Setter Property="Content" Value="■ System audio" />
+                                                    <Setter Property="Background" Value="{StaticResource WarnBrush}" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Button.Style>
+                                </Button>
+                                <TextBlock Text="{Binding Interviewer.Status}" Foreground="{StaticResource SubtleTextBrush}"
+                                           FontSize="11" Margin="2,4,0,0" />
+                            </StackPanel>
+
+                            <!-- Microphone (You) start/stop + status -->
+                            <StackPanel Grid.Column="2">
+                                <Button Command="{Binding You.ToggleCommand}" FontWeight="Bold" HorizontalAlignment="Stretch">
+                                    <Button.Style>
+                                        <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+                                            <Setter Property="Content" Value="▶ Microphone" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding You.IsListening}" Value="True">
+                                                    <Setter Property="Content" Value="■ Microphone" />
+                                                    <Setter Property="Background" Value="{StaticResource WarnBrush}" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Button.Style>
+                                </Button>
+                                <TextBlock Text="{Binding You.Status}" Foreground="{StaticResource SubtleTextBrush}"
+                                           FontSize="11" Margin="2,4,0,0" />
+                            </StackPanel>
+                        </Grid>
+
+                        <!-- Microphone picker: disabled while listening (a restart is needed to switch). -->
+                        <Grid Margin="0,8,0,0" IsEnabled="{Binding You.CanSelectMicrophone}">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <ComboBox Grid.Column="0" ItemsSource="{Binding You.Microphones}"
+                                      SelectedItem="{Binding You.SelectedMicrophone, Mode=TwoWay}"
+                                      DisplayMemberPath="Name" ToolTip="Choose which microphone to listen to" />
+                            <Button Grid.Column="1" Content="⟳" Command="{Binding You.RefreshMicrophonesCommand}"
+                                    Margin="6,0,0,0" Padding="10,4" ToolTip="Refresh microphone list" />
+                        </Grid>
+                    </StackPanel>
+
+                    <!-- Staged (committed) messages: system audio left, microphone right, in completion order. -->
+                    <ScrollViewer Grid.Row="2" x:Name="StagingScroll" Margin="8,6" VerticalScrollBarVisibility="Auto">
+                        <ItemsControl ItemsSource="{Binding Staged}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <StackPanel Margin="4,3"
+                                                HorizontalAlignment="{Binding IsMic, Converter={StaticResource BoolToAlignment}}">
+                                        <Border Padding="10,8" CornerRadius="10" MaxWidth="300"
+                                                Background="{Binding IsMic, Converter={StaticResource BoolToBubbleBrush}}">
+                                            <StackPanel>
+                                                <TextBlock Text="{Binding Speaker}" FontSize="10" FontWeight="Bold"
+                                                           Foreground="{StaticResource SubtleTextBrush}" Margin="0,0,0,2" />
+                                                <TextBlock Text="{Binding Text}" TextWrapping="Wrap"
+                                                           Foreground="{StaticResource TextBrush}" FontSize="13" />
+                                            </StackPanel>
+                                        </Border>
+                                        <TextBlock Text="{Binding TimeText}" FontSize="10" Margin="4,1,4,0"
+                                                   Foreground="{StaticResource SubtleTextBrush}"
+                                                   HorizontalAlignment="{Binding IsMic, Converter={StaticResource BoolToAlignment}}" />
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </ScrollViewer>
+
+                    <!-- Live interim bubbles: one per channel, shown only while that channel has an in-progress
+                         hypothesis. They vanish as the phrase settles into a staged message above. -->
+                    <StackPanel Grid.Row="3" Margin="12,0,12,4">
+                        <Border HorizontalAlignment="Left" Padding="10,8" CornerRadius="10" MaxWidth="300" Margin="0,2"
+                                Background="{StaticResource PanelBg}" BorderBrush="#3A3A40" BorderThickness="1"
+                                Visibility="{Binding Interviewer.InterimText, Converter={StaticResource StringToVisibility}}">
+                            <StackPanel>
+                                <TextBlock Text="Interviewer · live" FontSize="10" FontWeight="Bold"
+                                           Foreground="{StaticResource SubtleTextBrush}" Margin="0,0,0,2" />
+                                <TextBlock Text="{Binding Interviewer.InterimText}" TextWrapping="Wrap" FontStyle="Italic"
+                                           Foreground="{StaticResource SubtleTextBrush}" FontSize="13" />
+                            </StackPanel>
+                        </Border>
+                        <Border HorizontalAlignment="Right" Padding="10,8" CornerRadius="10" MaxWidth="300" Margin="0,2"
+                                Background="{StaticResource PanelBg}" BorderBrush="#3A3A40" BorderThickness="1"
+                                Visibility="{Binding You.InterimText, Converter={StaticResource StringToVisibility}}">
+                            <StackPanel>
+                                <TextBlock Text="You · live" FontSize="10" FontWeight="Bold"
+                                           Foreground="{StaticResource SubtleTextBrush}" Margin="0,0,0,2" />
+                                <TextBlock Text="{Binding You.InterimText}" TextWrapping="Wrap" FontStyle="Italic"
+                                           Foreground="{StaticResource SubtleTextBrush}" FontSize="13" />
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+
+                    <!-- Send / Clear the staged batch. -->
+                    <Grid Grid.Row="4" Margin="12,4,12,12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <Button Grid.Column="0" Content="Clear" Command="{Binding ClearStagedCommand}" Background="#555" />
+                        <Button Grid.Column="2" Content="Send to agent →" Command="{Binding SendCommand}"
+                                FontWeight="Bold"
+                                ToolTip="Send all staged transcriptions to the assistant and clear this window" />
+                    </Grid>
+                </Grid>
+            </Border>
+
+            <!-- ============================================================================= -->
+            <!-- ===== Agent chat card (right; drag its title bar to move) =================== -->
+            <!-- ============================================================================= -->
+            <Border x:Name="ChatCard" Width="420" Height="560"
                     Background="{StaticResource WindowBg}" CornerRadius="10"
                     BorderBrush="#3A3A40" BorderThickness="1">
                 <Border.Effect>
@@ -38,11 +200,11 @@
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />  <!-- title bar -->
                         <RowDefinition Height="Auto" />  <!-- protection warning banner -->
-                        <RowDefinition Height="*" />     <!-- chat / settings -->
+                        <RowDefinition Height="*" />     <!-- chat / settings / logs -->
                     </Grid.RowDefinitions>
 
                     <!-- ===== Title bar (drag to move via the fake cursor while interactive) ===== -->
-                    <Border x:Name="TitleBar" Grid.Row="0" Background="{StaticResource PanelBg}"
+                    <Border x:Name="ChatTitleBar" Grid.Row="0" Background="{StaticResource PanelBg}"
                             CornerRadius="10,10,0,0">
                         <Grid Margin="10,6">
                             <Grid.ColumnDefinitions>
@@ -66,8 +228,6 @@
                             </StackPanel>
 
                             <StackPanel Grid.Column="2" Orientation="Horizontal">
-                                <Button Content="Speech" Command="{Binding ToggleSpeechCommand}"
-                                        Background="Transparent" Padding="8,4" />
                                 <Button Content="Logs" Command="{Binding ToggleLogCommand}"
                                         Background="Transparent" Padding="8,4" />
                                 <Button Content="Settings" Command="{Binding ToggleSettingsCommand}"
@@ -91,12 +251,11 @@
                         </StackPanel>
                     </Border>
 
-                    <!-- ===== Chat surface ===== -->
+                    <!-- ===== Chat surface (display-only; all input comes from the staging window) ===== -->
                     <Grid Grid.Row="2"
                           Visibility="{Binding IsChatOpen, Converter={StaticResource BoolToVisibility}}">
                         <Grid.RowDefinitions>
                             <RowDefinition Height="*" />
-                            <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
                         </Grid.RowDefinitions>
 
@@ -117,141 +276,11 @@
                         </ScrollViewer>
 
                         <!-- Error line -->
-                        <Border Grid.Row="1" Background="#3A1F1F" Padding="8,4" Margin="8,0"
+                        <Border Grid.Row="1" Background="#3A1F1F" Padding="8,4" Margin="8,0,8,8"
                                 Visibility="{Binding Chat.ErrorMessage, Converter={StaticResource StringToVisibility}}">
                             <TextBlock Text="{Binding Chat.ErrorMessage}" Foreground="#FF8A80" TextWrapping="Wrap" FontSize="11" />
                         </Border>
-
-                        <!-- Input row -->
-                        <Grid Grid.Row="2" Margin="8">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="Auto" />
-                            </Grid.ColumnDefinitions>
-
-                            <Button Grid.Column="0" x:Name="MicButton" Command="{Binding Chat.ToggleVoiceCommand}"
-                                    Margin="0,0,6,0" Padding="10,6"
-                                    ToolTip="Push-to-talk (Ctrl+Shift+V)">
-                                <Button.Style>
-                                    <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
-                                        <Setter Property="Content" Value="🎙" />
-                                        <Style.Triggers>
-                                            <DataTrigger Binding="{Binding Chat.IsRecording}" Value="True">
-                                                <Setter Property="Content" Value="⏺ Rec" />
-                                                <Setter Property="Background" Value="{StaticResource WarnBrush}" />
-                                            </DataTrigger>
-                                        </Style.Triggers>
-                                    </Style>
-                                </Button.Style>
-                            </Button>
-
-                            <TextBox Grid.Column="1" Text="{Binding Chat.InputText, UpdateSourceTrigger=PropertyChanged}"
-                                     VerticalContentAlignment="Center" AcceptsReturn="False"
-                                     KeyDown="Input_KeyDown" />
-
-                            <Button Grid.Column="2" Content="Send" Command="{Binding Chat.SendCommand}"
-                                    Margin="6,0,0,0" />
-                        </Grid>
                     </Grid>
-
-                    <!-- ===== Speech-to-Text panel (overlay) ===== -->
-                    <!-- Two independent channels stacked vertically: "You" (microphone) and "Interviewer"
-                         (system audio). Each runs its own recognizer and shows its own transcript. -->
-                    <Border Grid.Row="2" Background="{StaticResource WindowBg}"
-                            Visibility="{Binding IsSpeechOpen, Converter={StaticResource BoolToVisibility}}">
-                        <Border.Resources>
-                            <!-- One reusable block per channel, bound to a SpeechChannelViewModel. -->
-                            <DataTemplate x:Key="SpeechChannelTemplate">
-                                <Border Background="{StaticResource PanelBg}" Margin="16,0,16,10"
-                                        Padding="10" CornerRadius="6">
-                                    <Grid>
-                                        <Grid.RowDefinitions>
-                                            <RowDefinition Height="Auto" />  <!-- title + start/stop + clear -->
-                                            <RowDefinition Height="Auto" />  <!-- mic picker (mic channel only) -->
-                                            <RowDefinition Height="Auto" />  <!-- status -->
-                                            <RowDefinition Height="*" />     <!-- transcript -->
-                                        </Grid.RowDefinitions>
-
-                                        <!-- Header row -->
-                                        <Grid Grid.Row="0">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="*" />
-                                                <ColumnDefinition Width="Auto" />
-                                                <ColumnDefinition Width="Auto" />
-                                            </Grid.ColumnDefinitions>
-
-                                            <TextBlock Grid.Column="0" Text="{Binding Title}" FontSize="14" FontWeight="Bold"
-                                                       Foreground="{StaticResource TextBrush}" VerticalAlignment="Center" />
-
-                                            <Button Grid.Column="1" Command="{Binding ToggleCommand}" Padding="12,5"
-                                                    FontWeight="Bold" Margin="6,0,0,0">
-                                                <Button.Style>
-                                                    <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
-                                                        <Setter Property="Content" Value="● Start" />
-                                                        <Style.Triggers>
-                                                            <DataTrigger Binding="{Binding IsListening}" Value="True">
-                                                                <Setter Property="Content" Value="■ Stop" />
-                                                                <Setter Property="Background" Value="{StaticResource WarnBrush}" />
-                                                            </DataTrigger>
-                                                        </Style.Triggers>
-                                                    </Style>
-                                                </Button.Style>
-                                            </Button>
-
-                                            <Button Grid.Column="2" Content="Clear" Command="{Binding ClearCommand}"
-                                                    Padding="10,5" Margin="6,0,0,0" Background="#555" />
-                                        </Grid>
-
-                                        <!-- Microphone picker: lists every active capture device; disabled while listening.
-                                             Collapsed for the system-audio channel (nothing to choose). -->
-                                        <Grid Grid.Row="1" Margin="0,8,0,0"
-                                              Visibility="{Binding SupportsDeviceSelection, Converter={StaticResource BoolToVisibility}}"
-                                              IsEnabled="{Binding CanSelectMicrophone}">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="*" />
-                                                <ColumnDefinition Width="Auto" />
-                                            </Grid.ColumnDefinitions>
-                                            <ComboBox Grid.Column="0" ItemsSource="{Binding Microphones}"
-                                                      SelectedItem="{Binding SelectedMicrophone, Mode=TwoWay}"
-                                                      DisplayMemberPath="Name" ToolTip="Choose which microphone to listen to" />
-                                            <Button Grid.Column="1" Content="⟳" Command="{Binding RefreshMicrophonesCommand}"
-                                                    Margin="6,0,0,0" Padding="10,4" ToolTip="Refresh microphone list" />
-                                        </Grid>
-
-                                        <TextBlock Grid.Row="2" Text="{Binding Status}" Foreground="{StaticResource SubtleTextBrush}"
-                                                   Margin="0,6,0,6" FontSize="11" />
-
-                                        <ScrollViewer Grid.Row="3" VerticalScrollBarVisibility="Auto" MinHeight="80">
-                                            <StackPanel>
-                                                <TextBlock Text="{Binding FinalTranscript}" TextWrapping="Wrap"
-                                                           Foreground="{StaticResource TextBrush}" FontSize="13" />
-                                                <TextBlock Text="{Binding InterimText}" TextWrapping="Wrap"
-                                                           Foreground="{StaticResource SubtleTextBrush}" FontSize="13"
-                                                           FontStyle="Italic" Margin="0,2,0,0" />
-                                            </StackPanel>
-                                        </ScrollViewer>
-                                    </Grid>
-                                </Border>
-                            </DataTemplate>
-                        </Border.Resources>
-
-                        <Grid DataContext="{Binding Speech}">
-                            <Grid.RowDefinitions>
-                                <RowDefinition Height="Auto" />  <!-- header -->
-                                <RowDefinition Height="*" />     <!-- You channel -->
-                                <RowDefinition Height="*" />     <!-- Interviewer channel -->
-                            </Grid.RowDefinitions>
-
-                            <TextBlock Grid.Row="0" Text="Speech-to-Text (Azure)" FontSize="16" FontWeight="Bold"
-                                       Foreground="{StaticResource TextBrush}" Margin="16,16,16,8" />
-
-                            <ContentControl Grid.Row="1" Content="{Binding You}"
-                                            ContentTemplate="{StaticResource SpeechChannelTemplate}" />
-                            <ContentControl Grid.Row="2" Content="{Binding Interviewer}"
-                                            ContentTemplate="{StaticResource SpeechChannelTemplate}" />
-                        </Grid>
-                    </Border>
 
                     <!-- ===== Log panel (overlay) ===== -->
                     <!-- Live view of the unified logger: every error/exception/event, mirrored from the same

@@ -44,8 +44,8 @@ public partial class MainWindow : Window
 
     // Fake-cursor position, in RootCanvas (device-independent) coordinates.
     private Point _fakeCursor;
-    // Drag state while the fake cursor is holding the title bar.
-    private bool _panelDragging;
+    // The card whose title bar the fake cursor is currently dragging (null when not dragging).
+    private Border? _draggingCard;
     // The button pressed by the fake cursor, invoked on release if still under the cursor.
     private ButtonBase? _pressedButton;
 
@@ -77,26 +77,42 @@ public partial class MainWindow : Window
                 LogScroll.ScrollToEnd();
         };
 
+        // Keep the staging window pinned to the newest committed transcription.
+        _vm.Speech.Staged.CollectionChanged += (_, e) =>
+        {
+            if (e.Action == System.Collections.Specialized.NotifyCollectionChangedAction.Add)
+                StagingScroll.ScrollToEnd();
+        };
+
         // Cover the whole virtual desktop (all monitors). The card is positioned within it.
         Left = SystemParameters.VirtualScreenLeft;
         Top = SystemParameters.VirtualScreenTop;
         Width = SystemParameters.VirtualScreenWidth;
         Height = SystemParameters.VirtualScreenHeight;
 
-        Loaded += (_, _) => PlacePanelTopRight();
+        Loaded += (_, _) => PlaceCardsTopRight();
     }
 
-    /// <summary>Places the floating card near the top-right of the primary working area (once).</summary>
-    private void PlacePanelTopRight()
+    /// <summary>
+    /// Places the two floating cards near the top-right of the primary working area (once): the chat
+    /// card on the right, the transcription-staging card immediately to its left.
+    /// </summary>
+    private void PlaceCardsTopRight()
     {
         if (_panelPlaced)
             return;
         _panelPlaced = true;
 
+        const double gap = 12;
         var wa = SystemParameters.WorkArea;
         // WorkArea is in screen coordinates; the canvas origin is the window's top-left.
-        Canvas.SetLeft(PanelCard, wa.Right - PanelCard.Width - 24 - Left);
-        Canvas.SetTop(PanelCard, wa.Top + 24 - Top);
+        double top = wa.Top + 24 - Top;
+        double chatLeft = wa.Right - ChatCard.Width - 24 - Left;
+
+        Canvas.SetLeft(ChatCard, chatLeft);
+        Canvas.SetTop(ChatCard, top);
+        Canvas.SetLeft(StagingCard, chatLeft - StagingCard.Width - gap);
+        Canvas.SetTop(StagingCard, top);
     }
 
     /// <summary>
@@ -278,7 +294,7 @@ public partial class MainWindow : Window
         _fakeCursor = ClampToCanvas(RootCanvas.PointFromScreen(new Point(p.X, p.Y)));
         MoveFakeCursor();
 
-        _panelDragging = false;
+        _draggingCard = null;
         _pressedButton = null;
         _vm.IsInteractive = true;
 
@@ -296,7 +312,7 @@ public partial class MainWindow : Window
             return;
 
         _interactive.Exit();   // releases the cursor clip and restores the previous foreground app
-        _panelDragging = false;
+        _draggingCard = null;
         _pressedButton = null;
         _vm.IsInteractive = false;
     }
@@ -315,8 +331,8 @@ public partial class MainWindow : Window
         _fakeCursor = ClampToCanvas(new Point(_fakeCursor.X + dx, _fakeCursor.Y + dy));
         MoveFakeCursor();
 
-        if (_panelDragging)
-            MovePanelBy(dx, dy);
+        if (_draggingCard is not null)
+            MoveCardBy(_draggingCard, dx, dy);
     }
 
     private void OnInteractiveButtonPressed(OverlayMouseButton button)
@@ -342,9 +358,11 @@ public partial class MainWindow : Window
             return;
         }
 
-        // Otherwise, pressing the title bar starts a drag.
-        if (IsWithin(hit, TitleBar))
-            _panelDragging = true;
+        // Otherwise, pressing a card's title bar starts dragging that card.
+        if (IsWithin(hit, ChatTitleBar))
+            _draggingCard = ChatCard;
+        else if (IsWithin(hit, StagingTitleBar))
+            _draggingCard = StagingCard;
     }
 
     private void OnInteractiveButtonReleased(OverlayMouseButton button)
@@ -352,9 +370,9 @@ public partial class MainWindow : Window
         if (button != OverlayMouseButton.Left)
             return;
 
-        if (_panelDragging)
+        if (_draggingCard is not null)
         {
-            _panelDragging = false;
+            _draggingCard = null;
             return;
         }
 
@@ -388,16 +406,16 @@ public partial class MainWindow : Window
         Math.Clamp(p.X, 0, Math.Max(0, RootCanvas.ActualWidth)),
         Math.Clamp(p.Y, 0, Math.Max(0, RootCanvas.ActualHeight)));
 
-    private void MovePanelBy(double dx, double dy)
+    private void MoveCardBy(Border card, double dx, double dy)
     {
         // Keep a sliver of the card on-screen so it can never be lost off an edge.
         const double margin = 60;
-        double left = Math.Clamp(Canvas.GetLeft(PanelCard) + dx,
-            -(PanelCard.ActualWidth - margin), Math.Max(0, RootCanvas.ActualWidth - margin));
-        double top = Math.Clamp(Canvas.GetTop(PanelCard) + dy,
+        double left = Math.Clamp(Canvas.GetLeft(card) + dx,
+            -(card.ActualWidth - margin), Math.Max(0, RootCanvas.ActualWidth - margin));
+        double top = Math.Clamp(Canvas.GetTop(card) + dy,
             0, Math.Max(0, RootCanvas.ActualHeight - margin));
-        Canvas.SetLeft(PanelCard, left);
-        Canvas.SetTop(PanelCard, top);
+        Canvas.SetLeft(card, left);
+        Canvas.SetTop(card, top);
     }
 
     /// <summary>Hit-tests the visual tree at a RootCanvas point; returns the top-most hit visual.</summary>
@@ -520,15 +538,6 @@ public partial class MainWindow : Window
     }
 
     private void Close_Click(object sender, RoutedEventArgs e) => Close();
-
-    private void Input_KeyDown(object sender, KeyEventArgs e)
-    {
-        if (e.Key == Key.Enter && _vm.Chat.SendCommand.CanExecute(null))
-        {
-            _vm.Chat.SendCommand.Execute(null);
-            e.Handled = true;
-        }
-    }
 
     private void SaveSettings_Click(object sender, RoutedEventArgs e)
     {
