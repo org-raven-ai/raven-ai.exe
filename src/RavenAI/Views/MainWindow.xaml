@@ -391,7 +391,7 @@
                                 </TextBlock>
 
                                 <!-- Protection pill: Invisible (ok, pulsing) / Exposed (crit) -->
-                                <Border Margin="10,0,0,0" CornerRadius="999" Padding="10,3"
+                                <Border Margin="10,0,0,0" CornerRadius="8" Padding="10,3"
                                         Background="{StaticResource OkDimBrush}"
                                         BorderBrush="{StaticResource OkBorderBrush}" BorderThickness="1"
                                         VerticalAlignment="Center" ToolTip="{Binding ProtectionStatus}"
@@ -403,7 +403,7 @@
                                                    Foreground="{StaticResource OkBrush}" />
                                     </StackPanel>
                                 </Border>
-                                <Border Margin="10,0,0,0" CornerRadius="999" Padding="10,3"
+                                <Border Margin="10,0,0,0" CornerRadius="8" Padding="10,3"
                                         Background="{StaticResource CritDimBrush}"
                                         BorderBrush="{StaticResource CritBorderBrush}" BorderThickness="1"
                                         VerticalAlignment="Center" ToolTip="{Binding ProtectionStatus}"
@@ -698,7 +698,7 @@
                                             <PasswordBox x:Name="APIKeyBox" Margin="0,0,0,6" />
                                             <TextBlock Style="{StaticResource HintText}" Margin="0,0,0,6"
                                                        Text="Stored encrypted (DPAPI). Leave blank to keep the current key." />
-                                            <Border HorizontalAlignment="Left" CornerRadius="999" Padding="10,4"
+                                            <Border HorizontalAlignment="Left" CornerRadius="8" Padding="10,4"
                                                     Margin="0,0,0,12" Background="{StaticResource OkDimBrush}"
                                                     BorderBrush="{StaticResource OkChipBorderBrush}" BorderThickness="1"
                                                     Visibility="{Binding HasStoredKey, Converter={StaticResource BoolToVisibility}}">
@@ -783,7 +783,7 @@
 
                                             <TextBlock Style="{StaticResource LabelCaption}" Text="AZURE SPEECH KEY" />
                                             <PasswordBox x:Name="AzureSpeechKeyBox" Margin="0,0,0,6" />
-                                            <Border HorizontalAlignment="Left" CornerRadius="999" Padding="10,4"
+                                            <Border HorizontalAlignment="Left" CornerRadius="8" Padding="10,4"
                                                     Margin="0,0,0,12" Background="{StaticResource OkDimBrush}"
                                                     BorderBrush="{StaticResource OkChipBorderBrush}" BorderThickness="1"
                                                     Visibility="{Binding HasStoredAzureSpeechKey, Converter={StaticResource BoolToVisibility}}">
@@ -834,7 +834,7 @@
                                             <PasswordBox x:Name="WebSearchKeyBox" Margin="0,0,0,6" />
                                             <TextBlock Style="{StaticResource HintText}" Margin="0,0,0,6"
                                                        Text="Enables the assistant's web_search tool. Stored encrypted (DPAPI). Leave blank to keep the current key." />
-                                            <Border HorizontalAlignment="Left" CornerRadius="999" Padding="10,4"
+                                            <Border HorizontalAlignment="Left" CornerRadius="8" Padding="10,4"
                                                     Margin="0,0,0,12" Background="{StaticResource OkDimBrush}"
                                                     BorderBrush="{StaticResource OkChipBorderBrush}" BorderThickness="1"
                                                     Visibility="{Binding HasStoredWebSearchKey, Converter={StaticResource BoolToVisibility}}">
@@ -918,7 +918,7 @@
         <!-- ===== Interactive-mode hint (top-center) ===== -->
         <Border VerticalAlignment="Top" HorizontalAlignment="Center" Margin="0,14,0,0"
                 Background="#E6141826" BorderBrush="{StaticResource LineBrush}" BorderThickness="1"
-                CornerRadius="999" Padding="14,7" IsHitTestVisible="False"
+                CornerRadius="9" Padding="14,7" IsHitTestVisible="False"
                 Visibility="{Binding IsInteractive, Converter={StaticResource BoolToVisibility}}">
             <TextBlock Foreground="{StaticResource Text2Brush}" FontFamily="{StaticResource FontMono}" FontSize="11.5"
                        Text="Interactive mode — real cursor frozen · Esc or Ctrl+Shift+I to exit" />
