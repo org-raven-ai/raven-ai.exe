@@ -26,6 +26,12 @@ public sealed partial class MainViewModel : ObservableObject
     /// </summary>
     [ObservableProperty] private bool _isInteractive;
 
+    /// <summary>
+    /// True while the first-run provider gate is shown. It opens when no API key is stored yet
+    /// and hides the staging/chat cards until the key has been validated and Unlock pressed.
+    /// </summary>
+    [ObservableProperty] private bool _isGateOpen;
+
     // Capture-protection status surfaced to the UI.
     [ObservableProperty] private bool _isProtected;
     [ObservableProperty] private bool _isFullyHidden;
@@ -44,6 +50,9 @@ public sealed partial class MainViewModel : ObservableObject
         Speech = speech;
         Log = log;
         Settings.Saved += () => IsSettingsOpen = false;
+
+        // First run: no provider key yet — show the gate instead of the overlay cards.
+        IsGateOpen = !settings.HasStoredKey;
 
         // The staging window's Send button routes its batched transcript into the chat. Close any
         // Settings/Logs overlay first so the streaming reply is visible in the chat card.

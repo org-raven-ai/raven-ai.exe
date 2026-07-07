@@ -132,6 +132,10 @@ public partial class MainWindow : Window
         Canvas.SetTop(ChatCard, top);
         Canvas.SetLeft(StagingCard, chatLeft - StagingCard.Width - gap);
         Canvas.SetTop(StagingCard, top);
+
+        // The first-run gate floats centered in the primary work area (upper third).
+        Canvas.SetLeft(GateCard, (wa.Left + wa.Right - GateCard.Width) / 2 - Left);
+        Canvas.SetTop(GateCard, wa.Top + Math.Max(24, wa.Height * 0.16) - Top);
     }
 
     /// <summary>
@@ -408,6 +412,8 @@ public partial class MainWindow : Window
             _draggingCard = ChatCard;
         else if (IsWithin(hit, StagingTitleBar))
             _draggingCard = StagingCard;
+        else if (IsWithin(hit, GateTitleBar))
+            _draggingCard = GateCard;
     }
 
     private void OnInteractiveButtonReleased(OverlayMouseButton button)
@@ -640,6 +646,62 @@ public partial class MainWindow : Window
     }
 
     private void Close_Click(object sender, RoutedEventArgs e) => Close();
+
+    // ---- First-run provider gate ------------------------------------------------------------
+
+    /// <summary>
+    /// Validates the gate's Base URL + API key: pulls the secret out of whichever key box is
+    /// visible (PasswordBox intentionally has no binding) and hands it to the view model, which
+    /// persists the pair and probes the provider's /models endpoint.
+    /// </summary>
+    private void GateValidate_Click(object sender, RoutedEventArgs e)
+    {
+        _vm.Settings.APIKeyInput =
+            GateKeyPeek.IsChecked == true ? GateKeyPlainBox.Text : GateKeyBox.Password;
+        _vm.Settings.ValidateGateCommand.Execute(null);
+    }
+
+    /// <summary>
+    /// Commits the gate: stores any optional channel keys typed in, saves the settings, and
+    /// dismisses the gate so the overlay cards appear. Enabled only after a successful Validate.
+    /// </summary>
+    private void GateUnlock_Click(object sender, RoutedEventArgs e)
+    {
+        if (!_vm.Settings.GateKeyValidated)
+            return;
+
+        _vm.Settings.AzureSpeechKeyInput = GateAzureKeyBox.Password;
+        _vm.Settings.WebSearchKeyInput = GateTavilyKeyBox.Password;
+        _vm.Settings.SaveCommand.Execute(null);
+
+        GateKeyBox.Clear();
+        GateKeyPlainBox.Clear();
+        GateAzureKeyBox.Clear();
+        GateTavilyKeyBox.Clear();
+        _vm.IsGateOpen = false;
+    }
+
+    /// <summary>Peek on: mirror the secret into the visible plain box.</summary>
+    private void GatePeek_Checked(object sender, RoutedEventArgs e)
+    {
+        GateKeyPlainBox.Text = GateKeyBox.Password;
+        GateKeyPlainBox.Visibility = Visibility.Visible;
+        GateKeyBox.Visibility = Visibility.Collapsed;
+    }
+
+    /// <summary>Peek off: mirror any edits back into the masked box.</summary>
+    private void GatePeek_Unchecked(object sender, RoutedEventArgs e)
+    {
+        GateKeyBox.Password = GateKeyPlainBox.Text;
+        GateKeyBox.Visibility = Visibility.Visible;
+        GateKeyPlainBox.Visibility = Visibility.Collapsed;
+    }
+
+    private void GateGetKey_Click(object sender, RoutedEventArgs e)
+    {
+        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(
+            "https://platform.openai.com/api-keys") { UseShellExecute = true });
+    }
 
     private void SaveSettings_Click(object sender, RoutedEventArgs e)
     {

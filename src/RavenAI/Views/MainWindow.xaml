@@ -99,6 +99,7 @@
             <Border x:Name="StagingCard" Width="400" Height="560"
                     Background="{StaticResource CardFaceBrush}" CornerRadius="16"
                     BorderBrush="{StaticResource LineBrush}" BorderThickness="1"
+                    Visibility="{Binding DataContext.IsGateOpen, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource BoolToVisibility}, ConverterParameter=Invert}"
                     DataContext="{Binding Speech}">
                 <Border.Effect>
                     <DropShadowEffect Color="Black" BlurRadius="34" ShadowDepth="6" Direction="270" Opacity="0.6" />
@@ -352,7 +353,8 @@
             <!-- ============================================================================= -->
             <Border x:Name="ChatCard" Width="420" Height="560"
                     Background="{StaticResource CardFaceBrush}" CornerRadius="16"
-                    BorderBrush="{StaticResource LineBrush}" BorderThickness="1">
+                    BorderBrush="{StaticResource LineBrush}" BorderThickness="1"
+                    Visibility="{Binding IsGateOpen, Converter={StaticResource BoolToVisibility}, ConverterParameter=Invert}">
                 <Border.Effect>
                     <DropShadowEffect Color="Black" BlurRadius="34" ShadowDepth="6" Direction="270" Opacity="0.6" />
                 </Border.Effect>
@@ -911,6 +913,327 @@
                             </StackPanel>
                         </Grid>
                     </Border>
+                </Grid>
+            </Border>
+            <!-- ============================================================================= -->
+            <!-- ===== First-run provider gate (centered; shown until a key is stored) ======= -->
+            <!-- ============================================================================= -->
+            <!-- Blocks the overlay until the provider is connected: Base URL + API key are
+                 required; Validate proves them by listing /models, which also unlocks the
+                 commit button. Azure Speech / Tavily keys are optional channels. -->
+            <Border x:Name="GateCard" Width="452"
+                    Background="{StaticResource CardFaceBrush}" CornerRadius="16"
+                    BorderBrush="{StaticResource LineBrush}" BorderThickness="1"
+                    Visibility="{Binding IsGateOpen, Converter={StaticResource BoolToVisibility}}">
+                <Border.Effect>
+                    <DropShadowEffect Color="Black" BlurRadius="40" ShadowDepth="8" Direction="270" Opacity="0.65" />
+                </Border.Effect>
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />  <!-- title bar -->
+                        <RowDefinition Height="Auto" />  <!-- body -->
+                    </Grid.RowDefinitions>
+
+                    <!-- Title bar (drag to move via the fake cursor while interactive) -->
+                    <Border x:Name="GateTitleBar" Grid.Row="0" Background="{StaticResource TitlebarBrush}"
+                            CornerRadius="15,15,0,0" BorderBrush="{StaticResource Line2Brush}"
+                            BorderThickness="0,0,0,1" Height="38">
+                        <Grid Margin="13,0,8,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                <Viewbox Width="20" Height="20">
+                                    <Canvas Width="32" Height="32">
+                                        <Path Data="{StaticResource RavenMark}"
+                                              Fill="{StaticResource AccentGradientBrush}" />
+                                        <Ellipse Canvas.Left="19.6" Canvas.Top="9.1" Width="2.8" Height="2.8"
+                                                 Fill="{StaticResource InkBrush}" />
+                                    </Canvas>
+                                </Viewbox>
+                                <TextBlock Margin="9,0,0,0" FontFamily="{StaticResource FontMono}"
+                                           FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center">
+                                    <Run Text="raven" /><Run Text="_ai"
+                                         Foreground="{StaticResource AccentGradientBrush}" />
+                                </TextBlock>
+                            </StackPanel>
+                            <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                                <Button Style="{StaticResource IconButton}" Click="Minimize_Click"
+                                        ToolTip="Hide (Ctrl+Shift+Space to show)">
+                                    <Viewbox Width="15" Height="15">
+                                        <Path Style="{StaticResource IconPath}" Data="{StaticResource IconMinimize}"
+                                              Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" />
+                                    </Viewbox>
+                                </Button>
+                                <Button Style="{StaticResource CloseIconButton}" Click="Close_Click" ToolTip="Quit">
+                                    <Viewbox Width="14" Height="14">
+                                        <Path Style="{StaticResource IconPath}" Data="{StaticResource IconClose}"
+                                              Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" />
+                                    </Viewbox>
+                                </Button>
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+                    <Rectangle Grid.Row="0" Height="1" VerticalAlignment="Top" Margin="16,0"
+                               Fill="{StaticResource HairlineGradientBrush}" IsHitTestVisible="False" />
+
+                    <!-- Body -->
+                    <StackPanel Grid.Row="1" Margin="24,20,24,18" DataContext="{Binding Settings}">
+                        <TextBlock Text="FIRST RUN · CONNECT PROVIDER" FontFamily="{StaticResource FontMono}"
+                                   FontSize="11" Foreground="{StaticResource CyanBrush}" Margin="0,0,0,9" />
+                        <TextBlock Text="Point raven_ai at your model" FontFamily="{StaticResource FontMono}"
+                                   FontSize="21" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}"
+                                   TextWrapping="Wrap" Margin="0,0,0,8" />
+                        <TextBlock FontSize="13" Foreground="{StaticResource Text2Brush}" TextWrapping="Wrap"
+                                   LineHeight="19" Margin="0,0,0,18"
+                                   Text="Add a key to unlock the overlay — it drives chat, transcription and voice. Models and everything else are configured later in Settings." />
+
+                        <!-- Base URL -->
+                        <Grid Margin="0,0,0,6">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Style="{StaticResource LabelCaption}" Text="BASE URL" Margin="0"
+                                       VerticalAlignment="Center" />
+                            <Border Grid.Column="1" Margin="8,0,0,0" CornerRadius="6" Padding="7,1"
+                                    Background="{StaticResource VioletDimBrush}"
+                                    BorderBrush="{StaticResource VioletBorderBrush}" BorderThickness="1"
+                                    VerticalAlignment="Center">
+                                <TextBlock Text="REQUIRED" FontFamily="{StaticResource FontMono}" FontSize="9"
+                                           Foreground="{StaticResource VioletBrush}" />
+                            </Border>
+                            <TextBlock Grid.Column="2" Text="OpenAI-compatible /v1" FontSize="11"
+                                       Foreground="{StaticResource Text3Brush}" HorizontalAlignment="Right"
+                                       VerticalAlignment="Center" />
+                        </Grid>
+                        <TextBox Text="{Binding BaseURL, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,15" />
+
+                        <!-- API key + validate -->
+                        <Grid Margin="0,0,0,6">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Style="{StaticResource LabelCaption}" Text="API KEY" Margin="0"
+                                       VerticalAlignment="Center" />
+                            <Border Grid.Column="1" Margin="8,0,0,0" CornerRadius="6" Padding="7,1"
+                                    Background="{StaticResource VioletDimBrush}"
+                                    BorderBrush="{StaticResource VioletBorderBrush}" BorderThickness="1"
+                                    VerticalAlignment="Center">
+                                <TextBlock Text="REQUIRED" FontFamily="{StaticResource FontMono}" FontSize="9"
+                                           Foreground="{StaticResource VioletBrush}" />
+                            </Border>
+                            <TextBlock Grid.Column="2" Text="encrypted, never leaves this PC" FontSize="11"
+                                       Foreground="{StaticResource Text3Brush}" HorizontalAlignment="Right"
+                                       VerticalAlignment="Center" />
+                        </Grid>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <!-- Secret field with a peek toggle; the plain box swaps in while peeking -->
+                            <Grid Grid.Column="0">
+                                <PasswordBox x:Name="GateKeyBox" Padding="10,8,38,8" />
+                                <TextBox x:Name="GateKeyPlainBox" Padding="10,8,38,8" Visibility="Collapsed" />
+                                <ToggleButton x:Name="GateKeyPeek" Style="{StaticResource IconButton}"
+                                              Width="26" Height="26" HorizontalAlignment="Right"
+                                              Margin="0,0,6,0" ToolTip="Show / hide key"
+                                              Checked="GatePeek_Checked" Unchecked="GatePeek_Unchecked">
+                                    <Grid>
+                                        <Viewbox Width="15" Height="15"
+                                                 Visibility="{Binding IsChecked, ElementName=GateKeyPeek, Converter={StaticResource BoolToVisibility}, ConverterParameter=Invert}">
+                                            <Path Style="{StaticResource IconPath}" Data="{StaticResource IconEye}"
+                                                  Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ToggleButton}}" />
+                                        </Viewbox>
+                                        <Viewbox Width="15" Height="15"
+                                                 Visibility="{Binding IsChecked, ElementName=GateKeyPeek, Converter={StaticResource BoolToVisibility}}">
+                                            <Path Style="{StaticResource IconPath}" Data="{StaticResource IconEyeOff}"
+                                                  Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ToggleButton}}" />
+                                        </Viewbox>
+                                    </Grid>
+                                </ToggleButton>
+                            </Grid>
+                            <Button Grid.Column="1" Margin="8,0,0,0" Click="GateValidate_Click"
+                                    VerticalAlignment="Stretch">
+                                <Button.Style>
+                                    <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+                                        <Setter Property="Content" Value="Validate" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsValidatingGate}" Value="True">
+                                                <Setter Property="Content" Value="Checking…" />
+                                                <Setter Property="IsEnabled" Value="False" />
+                                            </DataTrigger>
+                                            <DataTrigger Binding="{Binding GateKeyValidated}" Value="True">
+                                                <Setter Property="Content" Value="Re-check" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Button.Style>
+                            </Button>
+                        </Grid>
+                        <!-- Status line: progress (muted), failure (crit) or verified (emerald) -->
+                        <TextBlock Text="{Binding GateStatus}" FontSize="11.5" TextWrapping="Wrap"
+                                   MinHeight="18" Margin="1,7,0,10"
+                                   Visibility="{Binding GateStatus, Converter={StaticResource StringToVisibility}}">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="Foreground" Value="{StaticResource Text3Brush}" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding GateStatusIsError}" Value="True">
+                                            <Setter Property="Foreground" Value="{StaticResource CritBrush}" />
+                                        </DataTrigger>
+                                        <DataTrigger Binding="{Binding GateKeyValidated}" Value="True">
+                                            <Setter Property="Foreground" Value="{StaticResource OkBrush}" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
+
+                        <!-- Optional channels: Azure Speech · Web search -->
+                        <ToggleButton x:Name="GateOptionalToggle" Cursor="Hand"
+                                      FocusVisualStyle="{x:Null}" HorizontalAlignment="Stretch"
+                                      HorizontalContentAlignment="Stretch">
+                            <ToggleButton.Template>
+                                <ControlTemplate TargetType="ToggleButton">
+                                    <ContentPresenter />
+                                </ControlTemplate>
+                            </ToggleButton.Template>
+                            <Border Background="{StaticResource Panel2Brush}"
+                                    BorderBrush="{StaticResource Line2Brush}" BorderThickness="1"
+                                    CornerRadius="11" Padding="13,10">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <Viewbox Width="11" Height="11" VerticalAlignment="Center"
+                                             RenderTransformOrigin="0.5,0.5">
+                                        <Viewbox.Style>
+                                            <Style TargetType="Viewbox">
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding IsChecked, ElementName=GateOptionalToggle}"
+                                                                 Value="True">
+                                                        <Setter Property="RenderTransform">
+                                                            <Setter.Value>
+                                                                <RotateTransform Angle="90" />
+                                                            </Setter.Value>
+                                                        </Setter>
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </Viewbox.Style>
+                                        <Path Style="{StaticResource IconPath}"
+                                              Data="{StaticResource IconChevronRight}"
+                                              Stroke="{StaticResource Text3Brush}" StrokeThickness="2.4" />
+                                    </Viewbox>
+                                    <TextBlock Grid.Column="1" Text="Add optional channels" Margin="10,0,0,0"
+                                               FontFamily="{StaticResource FontMono}" FontSize="11.5"
+                                               Foreground="{StaticResource Text2Brush}" VerticalAlignment="Center" />
+                                    <TextBlock Grid.Column="2" Text="Azure Speech · Web search" FontSize="10"
+                                               Foreground="{StaticResource Text3Brush}" VerticalAlignment="Center" />
+                                </Grid>
+                            </Border>
+                        </ToggleButton>
+                        <Border BorderBrush="{StaticResource Line2Brush}" BorderThickness="1,0,1,1"
+                                CornerRadius="0,0,11,11" Padding="13,12,13,13" Margin="0,-4,0,0"
+                                Background="{StaticResource Ink2Brush}"
+                                Visibility="{Binding IsChecked, ElementName=GateOptionalToggle, Converter={StaticResource BoolToVisibility}}">
+                            <StackPanel>
+                                <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                                    <Ellipse Width="7" Height="7" Fill="{StaticResource CyanBrush}"
+                                             VerticalAlignment="Center" />
+                                    <TextBlock Text="Azure Speech" Margin="8,0,0,0"
+                                               FontFamily="{StaticResource FontMono}" FontSize="11"
+                                               FontWeight="SemiBold" Foreground="{StaticResource TextBrush}" />
+                                    <TextBlock Text="— higher-accuracy transcription" Margin="8,0,0,0"
+                                               FontSize="11" Foreground="{StaticResource Text3Brush}" />
+                                </StackPanel>
+                                <Grid Margin="0,0,0,14">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="1.4*" />
+                                        <ColumnDefinition Width="10" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Grid.Column="0">
+                                        <TextBlock Style="{StaticResource MicroLabel}" Text="RESOURCE KEY" />
+                                        <PasswordBox x:Name="GateAzureKeyBox" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="2">
+                                        <TextBlock Style="{StaticResource MicroLabel}" Text="REGION / ENDPOINT" />
+                                        <TextBox Text="{Binding AzureSpeechEndpoint, UpdateSourceTrigger=PropertyChanged}" />
+                                    </StackPanel>
+                                </Grid>
+                                <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                                    <Ellipse Width="7" Height="7" Fill="{StaticResource VioletBrush}"
+                                             VerticalAlignment="Center" />
+                                    <TextBlock Text="Web search" Margin="8,0,0,0"
+                                               FontFamily="{StaticResource FontMono}" FontSize="11"
+                                               FontWeight="SemiBold" Foreground="{StaticResource TextBrush}" />
+                                    <TextBlock Text="— Tavily key for the agent's search tool" Margin="8,0,0,0"
+                                               FontSize="11" Foreground="{StaticResource Text3Brush}" />
+                                </StackPanel>
+                                <TextBlock Style="{StaticResource MicroLabel}" Text="TAVILY API KEY" />
+                                <PasswordBox x:Name="GateTavilyKeyBox" />
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Assurance -->
+                        <Border Margin="0,16,0,16" Padding="12,11" CornerRadius="11"
+                                Background="{StaticResource AssureBrush}"
+                                BorderBrush="{StaticResource OkBorderSoftBrush}" BorderThickness="1">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Viewbox Width="15" Height="15" VerticalAlignment="Top" Margin="0,1,9,0">
+                                    <Path Style="{StaticResource IconPath}" Data="{StaticResource IconShieldCheck}"
+                                          Stroke="{StaticResource OkBrush}" />
+                                </Viewbox>
+                                <TextBlock Grid.Column="1" FontSize="11.5" LineHeight="17" TextWrapping="Wrap"
+                                           Foreground="{StaticResource Text2Brush}">
+                                    <Run Text="Keys are sealed to this machine." FontWeight="SemiBold"
+                                         Foreground="{StaticResource TextBrush}" />
+                                    <Run Text="Each credential is encrypted with Windows DPAPI (current-user scope) and only ever sent to the endpoint you point it at." />
+                                </TextBlock>
+                            </Grid>
+                        </Border>
+
+                        <!-- Commit -->
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <Button Style="{StaticResource PrimaryButton}" Height="42"
+                                    HorizontalAlignment="Stretch" Click="GateUnlock_Click"
+                                    IsEnabled="{Binding GateKeyValidated}">
+                                <StackPanel Orientation="Horizontal">
+                                    <Viewbox Width="15" Height="15" Margin="0,0,8,0">
+                                        <Path Style="{StaticResource IconPath}" Data="{StaticResource IconLock}"
+                                              Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                                              StrokeThickness="2.2" />
+                                    </Viewbox>
+                                    <TextBlock Text="Unlock raven_ai" FontSize="13" FontWeight="SemiBold" />
+                                </StackPanel>
+                            </Button>
+                            <Button Grid.Column="1" Content="Get a key" Style="{StaticResource LinkButton}"
+                                    Margin="10,0,0,0" Click="GateGetKey_Click"
+                                    ToolTip="Open your provider's API-keys page" />
+                        </Grid>
+
+                        <TextBlock Text="Change any of this later in Settings → Provider" Margin="0,14,0,0"
+                                   FontFamily="{StaticResource FontMono}" FontSize="10.5"
+                                   Foreground="{StaticResource Text3Brush}" HorizontalAlignment="Center" />
+                    </StackPanel>
                 </Grid>
             </Border>
         </Canvas>
