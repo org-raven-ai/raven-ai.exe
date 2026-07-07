@@ -448,27 +448,32 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// Routes a wheel notch to whatever is under the fake cursor by raising a real
-    /// <see cref="UIElement.MouseWheelEvent"/>, so nested scroll viewers, list boxes and combo
-    /// popups all scroll exactly as they would under the real pointer. If nothing in the route
-    /// handled it, fall back to nudging the nearest <see cref="ScrollViewer"/> directly.
+    /// Routes a wheel notch to the nearest ancestor <see cref="ScrollViewer"/> that can actually
+    /// move in the wheel's direction, skipping ones that can't. Raising a routed wheel event
+    /// instead would let a non-scrollable inner viewer swallow the notch — every text box hosts a
+    /// ScrollViewer (PART_ContentHost) that marks the event handled even with nothing to scroll,
+    /// which froze the settings pane whenever the cursor sat over an input field. Skipping
+    /// exhausted viewers also hands the notch outward once an inner list hits its end.
     /// </summary>
     private void OnInteractiveWheel(int delta)
     {
         DependencyObject? hit = HitTest(_fakeCursor);
-        if (hit is null || FindAncestor<UIElement>(hit) is not UIElement target)
+        if (hit is null)
             return;
 
-        var args = new MouseWheelEventArgs(Mouse.PrimaryDevice, Environment.TickCount, delta)
+        for (DependencyObject? cur = hit; cur is not null; cur = VisualTreeHelper.GetParent(cur))
         {
-            RoutedEvent = UIElement.MouseWheelEvent,
-            Source = target,
-        };
-        target.RaiseEvent(args);
+            if (cur is ScrollViewer scroller && CanScroll(scroller, delta))
+            {
+                // One wheel notch is 120 units; scroll ~48 DIU per notch, wheel-up scrolls up.
+                scroller.ScrollToVerticalOffset(scroller.VerticalOffset - delta / 120.0 * 48.0);
+                return;
+            }
+        }
 
-        // One wheel notch is 120 units; scroll ~48 DIU per notch, wheel-up scrolls up.
-        if (!args.Handled && FindAncestor<ScrollViewer>(hit) is ScrollViewer scroller)
-            scroller.ScrollToVerticalOffset(scroller.VerticalOffset - delta / 120.0 * 48.0);
+        static bool CanScroll(ScrollViewer scroller, int delta) => delta > 0
+            ? scroller.VerticalOffset > 0
+            : scroller.VerticalOffset < scroller.ScrollableHeight;
     }
 
     // ---- Fake-cursor helpers --------------------------------------------------------------
