@@ -135,5 +135,24 @@ public sealed class FakeCursorWindow : Window
             return;
         _moveRequested = false;
         NativeWindowStyle.MoveTopmost(_hwnd, _targetX, _targetY);
+
+#if DEBUG
+        // Rate diagnostic (Logs panel): applied cursor moves per second while in motion.
+        // ≈ min(display refresh, mouse polling rate) when the mouse is moving continuously.
+        _movesApplied++;
+        long now = Environment.TickCount64;
+        if (now - _rateWindowStart >= 1000)
+        {
+            if (_rateWindowStart != 0)
+                Services.Logging.Log.Info($"Cursor moves applied: {_movesApplied}/s", "Cursor");
+            _rateWindowStart = now;
+            _movesApplied = 0;
+        }
+#endif
     }
+
+#if DEBUG
+    private int _movesApplied;
+    private long _rateWindowStart;
+#endif
 }
