@@ -68,6 +68,10 @@ public partial class MainWindow : Window
     private TextBox? _selectingTextBox;
     private int _selectionAnchor;
 
+    // The slider being dragged by the fake cursor (null when not dragging). Thumb's own drag
+    // needs real mouse capture, so the press/move handlers set the value from the cursor instead.
+    private Slider? _draggingSlider;
+
     // Virtual-key codes for the hotkeys.
     private const uint VK_SPACE = 0x20;
     private const uint VK_V = 0x56;
@@ -368,6 +372,12 @@ public partial class MainWindow : Window
             return;
         }
 
+        if (_draggingSlider is not null)
+        {
+            SetSliderValueFromCursor(_draggingSlider);
+            return;
+        }
+
         if (_selectingTextBox is not null)
             ExtendTextSelection(_selectingTextBox);
     }
@@ -380,6 +390,17 @@ public partial class MainWindow : Window
         DependencyObject? hit = HitTest(_fakeCursor);
         if (hit is null)
             return;
+
+        // A slider absorbs the press before the button check: its track halves are RepeatButtons,
+        // which would otherwise win and only nudge the value by LargeChange. Real Thumb dragging
+        // needs mouse capture the fake cursor can't provide, so re-implement the modern slider
+        // gesture instead — press jumps the value to the cursor, holding drags it.
+        if (FindAncestor<Slider>(hit) is Slider slider)
+        {
+            _draggingSlider = slider;
+            SetSliderValueFromCursor(slider);
+            return;
+        }
 
         // A button under the cursor wins over a title-bar drag (the title bar hosts buttons too).
         _pressedButton = FindAncestor<ButtonBase>(hit);
@@ -430,6 +451,7 @@ public partial class MainWindow : Window
             return;
 
         _selectingTextBox = null;
+        _draggingSlider = null;
 
         if (_draggingCard is not null)
         {
@@ -511,6 +533,16 @@ public partial class MainWindow : Window
         Services.Logging.Log.Info(
             $"Cursor scale: windowScale={windowScale:0.##} monitorDpiScale={monitorScale:0.##} " +
             $"baseSize={baseSize} sizeKnob={CursorSizeScale:0.##} -> scale={scale:0.###}", "Cursor");
+    }
+
+    // Maps the fake cursor's position across a horizontal slider's width onto its value range.
+    private void SetSliderValueFromCursor(Slider slider)
+    {
+        if (slider.ActualWidth <= 0)
+            return;
+        Point local = RootCanvas.TranslatePoint(_fakeCursor, slider);
+        double fraction = Math.Clamp(local.X / slider.ActualWidth, 0, 1);
+        slider.Value = slider.Minimum + fraction * (slider.Maximum - slider.Minimum);
     }
 
     // Extends the active text-box selection from the press anchor to the character under the cursor.
