@@ -86,7 +86,7 @@
 
         <!-- Absolute-positioned layer for the draggable floating cards. -->
         <Canvas x:Name="RootCanvas" Background="Transparent"
-                TextElement.FontFamily="{StaticResource FontUI}"
+                TextElement.FontFamily="{StaticResource FontMono}"
                 TextElement.Foreground="{StaticResource TextBrush}">
 
             <!-- ============================================================================= -->

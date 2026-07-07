@@ -8,7 +8,7 @@
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
     <!-- ================= Fonts ================= -->
-    <FontFamily x:Key="FontUI">Segoe UI Variable Display, Segoe UI Variable, Segoe UI</FontFamily>
+    <!-- The whole app is set in the mono face — every text surface, not just labels/code. -->
     <FontFamily x:Key="FontMono">Cascadia Code, Cascadia Mono, Consolas</FontFamily>
 
     <!-- ================= Color tokens ================= -->
@@ -185,7 +185,7 @@
     <!-- ================= Buttons ================= -->
     <!-- .btn — quiet panel button (implicit) -->
     <Style TargetType="Button">
-        <Setter Property="FontFamily" Value="{StaticResource FontUI}" />
+        <Setter Property="FontFamily" Value="{StaticResource FontMono}" />
         <Setter Property="FontWeight" Value="SemiBold" />
         <Setter Property="FontSize" Value="12.5" />
         <Setter Property="Foreground" Value="{StaticResource Text2Brush}" />
@@ -738,6 +738,7 @@
         <Setter Property="Background" Value="{StaticResource Panel2Brush}" />
         <Setter Property="Foreground" Value="{StaticResource Text2Brush}" />
         <Setter Property="BorderBrush" Value="{StaticResource LineBrush}" />
+        <Setter Property="FontFamily" Value="{StaticResource FontMono}" />
         <Setter Property="FontSize" Value="11" />
         <Setter Property="Template">
             <Setter.Value>
