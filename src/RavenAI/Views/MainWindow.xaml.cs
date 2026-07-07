@@ -103,7 +103,7 @@ public partial class MainWindow : Window
 
         DataContext = _vm;
         InitializeComponent();
-        ProtectPopupsFromCapture();
+        WirePopupHandlers();
 
         // Keep the log panel pinned to the newest entry as errors/events stream in.
         _vm.Log.Entries.CollectionChanged += (_, e) =>
@@ -238,18 +238,20 @@ public partial class MainWindow : Window
 
     // ---- Screen-capture protection --------------------------------------------------------
 
-    // Combo dropdowns and tooltips open in their own top-level popup HWNDs, which do NOT
-    // inherit the overlay's display affinity — without this they would be the one part of the
-    // UI visible in screen shares. Excluded per-popup as each one opens. No-op in Debug builds,
-    // where capture protection is intentionally disabled.
+    // Combo dropdowns and tooltips open in their own top-level popup HWNDs. Two consequences,
+    // both handled per-popup as each one opens:
+    //  - They stack above the fake-cursor window, so the cursor must be re-asserted topmost
+    //    whenever a dropdown opens (all builds).
+    //  - They do NOT inherit the overlay's display affinity — without exclusion they would be
+    //    the one part of the UI visible in screen shares (Release builds; Debug intentionally
+    //    runs with capture protection disabled).
 
 #if !DEBUG
     private static bool _toolTipCaptureHandlerRegistered;
 #endif
 
-    private void ProtectPopupsFromCapture()
+    private void WirePopupHandlers()
     {
-#if !DEBUG
         // The logical tree (unlike the visual tree) also reaches combos inside unselected tabs.
         foreach (ComboBox combo in FindLogicalDescendants<ComboBox>(this))
         {
@@ -257,10 +259,16 @@ public partial class MainWindow : Window
             c.DropDownOpened += (_, _) =>
                 // The popup's HWND is created as part of opening; defer until it exists.
                 Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () =>
+                {
+                    _cursorWindow?.BumpAbovePopups();
+#if !DEBUG
                     ExcludePopupVisualFromCapture(
-                        (c.Template.FindName("PART_Popup", c) as Popup)?.Child));
+                        (c.Template.FindName("PART_Popup", c) as Popup)?.Child);
+#endif
+                });
         }
 
+#if !DEBUG
         if (!_toolTipCaptureHandlerRegistered)
         {
             _toolTipCaptureHandlerRegistered = true;
@@ -391,6 +399,7 @@ public partial class MainWindow : Window
         // The cursor floats in its own topmost window so it stays above dropdown popups.
         _cursorWindow ??= new FakeCursorWindow();
         _cursorWindow.Show();
+        _cursorWindow.BumpAbovePopups();
 
         // Size the painted arrow to match the real cursor at the current DPI + pointer-size setting.
         UpdateCursorScale();
@@ -676,12 +685,9 @@ public partial class MainWindow : Window
 
     private void MoveFakeCursor()
     {
-        // The arrow's tip is authored at (0,0), so the cursor window's origin goes exactly on
-        // the fake-cursor point (converted to physical screen pixels).
-        if (_cursorWindow is null || PresentationSource.FromVisual(RootCanvas) is null)
-            return;
-        Point screen = RootCanvas.PointToScreen(_fakeCursor);
-        _cursorWindow.MoveTo((int)Math.Round(screen.X), (int)Math.Round(screen.Y));
+        // The cursor window mirrors the overlay's bounds, so canvas coordinates map 1:1. This
+        // runs per raw-input packet (up to ~1000 Hz) — it must stay a pure transform update.
+        _cursorWindow?.MoveTo(_fakeCursor);
     }
 
     // Scales the vector arrow to match the real cursor's on-screen size. The real cursor's physical
