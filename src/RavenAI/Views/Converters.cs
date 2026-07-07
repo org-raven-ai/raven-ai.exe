@@ -16,19 +16,6 @@ public sealed class BoolToAlignmentConverter : IValueConverter
         => throw new NotSupportedException();
 }
 
-/// <summary>Picks a bubble background: accent for the user, muted for the assistant.</summary>
-public sealed class BoolToBubbleBrushConverter : IValueConverter
-{
-    private static readonly Brush UserBrush = new SolidColorBrush(Color.FromRgb(0x2F, 0x6F, 0xED));
-    private static readonly Brush AssistantBrush = new SolidColorBrush(Color.FromRgb(0x2A, 0x2A, 0x2E));
-
-    public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
-        => value is true ? UserBrush : AssistantBrush;
-
-    public object ConvertBack(object value, Type t, object p, CultureInfo c)
-        => throw new NotSupportedException();
-}
-
 /// <summary>bool -> Visibility, with "Invert" parameter to reverse.</summary>
 public sealed class BoolToVisibilityConverter : IValueConverter
 {
@@ -53,13 +40,16 @@ public sealed class StringToVisibilityConverter : IValueConverter
         => throw new NotSupportedException();
 }
 
-/// <summary>Colours a log entry's level tag: red for errors, amber for warnings, muted otherwise.</summary>
+/// <summary>
+/// Colours a log entry's level tag with the night-instrument palette: crit for errors,
+/// warn amber for warnings, cyan for info, muted for everything else.
+/// </summary>
 public sealed class LogLevelToBrushConverter : IValueConverter
 {
-    private static readonly Brush ErrorBrush = new SolidColorBrush(Color.FromRgb(0xFF, 0x6B, 0x6B));
-    private static readonly Brush WarningBrush = new SolidColorBrush(Color.FromRgb(0xF0, 0xB1, 0x32));
-    private static readonly Brush InfoBrush = new SolidColorBrush(Color.FromRgb(0x8A, 0xB4, 0xF8));
-    private static readonly Brush DebugBrush = new SolidColorBrush(Color.FromRgb(0x9A, 0x9A, 0xA2));
+    private static readonly Brush ErrorBrush = new SolidColorBrush(Color.FromRgb(0xFF, 0x5C, 0x6C));
+    private static readonly Brush WarningBrush = new SolidColorBrush(Color.FromRgb(0xF2, 0xB3, 0x4B));
+    private static readonly Brush InfoBrush = new SolidColorBrush(Color.FromRgb(0x34, 0xD8, 0xE8));
+    private static readonly Brush DebugBrush = new SolidColorBrush(Color.FromRgb(0x6C, 0x74, 0x88));
 
     public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
         => value switch
