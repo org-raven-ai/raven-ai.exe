@@ -21,6 +21,8 @@ using TextBoxBase = System.Windows.Controls.Primitives.TextBoxBase;
 using Control = System.Windows.Controls.Control;
 using ComboBox = System.Windows.Controls.ComboBox;
 using TextBox = System.Windows.Controls.TextBox;
+using ScrollBar = System.Windows.Controls.Primitives.ScrollBar;
+using Orientation = System.Windows.Controls.Orientation;
 
 namespace RavenAI.Views;
 
@@ -71,6 +73,12 @@ public partial class MainWindow : Window
     // The slider being dragged by the fake cursor (null when not dragging). Thumb's own drag
     // needs real mouse capture, so the press/move handlers set the value from the cursor instead.
     private Slider? _draggingSlider;
+
+    // The scrollbar being dragged by the fake cursor, plus the scroll viewer it belongs to.
+    // Same story as the slider: Thumb dragging needs real mouse capture, so a press anywhere on
+    // the bar jumps the owner to that point and holding drags it.
+    private ScrollBar? _draggingScrollBar;
+    private ScrollViewer? _draggingScrollViewer;
 
     // Virtual-key codes for the hotkeys.
     private const uint VK_SPACE = 0x20;
@@ -378,6 +386,12 @@ public partial class MainWindow : Window
             return;
         }
 
+        if (_draggingScrollBar is not null && _draggingScrollViewer is not null)
+        {
+            SetScrollFromCursor(_draggingScrollBar, _draggingScrollViewer);
+            return;
+        }
+
         if (_selectingTextBox is not null)
             ExtendTextSelection(_selectingTextBox);
     }
@@ -388,6 +402,31 @@ public partial class MainWindow : Window
             return;
 
         DependencyObject? hit = HitTest(_fakeCursor);
+
+        // An open combo dropdown floats in its own popup window above the canvas, invisible to
+        // the canvas hit-test — give it first claim on the press.
+        if (FindOpenComboBox(RootCanvas) is ComboBox openCombo)
+        {
+            DependencyObject? popupHit = HitTestComboPopup(openCombo);
+            if (popupHit is not null)
+            {
+                if (FindAncestor<ComboBoxItem>(popupHit) is ComboBoxItem item)
+                {
+                    object dataItem = openCombo.ItemContainerGenerator.ItemFromContainer(item);
+                    openCombo.SelectedItem =
+                        dataItem == DependencyProperty.UnsetValue ? item : dataItem;
+                    openCombo.IsDropDownOpen = false;
+                }
+                return; // presses inside the popup never fall through to the canvas
+            }
+
+            // Pressing anywhere else closes the dropdown. On the combo itself (its face or its
+            // chevron) closing IS the whole click; elsewhere the press continues normally.
+            openCombo.IsDropDownOpen = false;
+            if (hit is not null && IsWithin(hit, openCombo))
+                return;
+        }
+
         if (hit is null)
             return;
 
@@ -399,6 +438,17 @@ public partial class MainWindow : Window
         {
             _draggingSlider = slider;
             SetSliderValueFromCursor(slider);
+            return;
+        }
+
+        // Same gesture for scrollbars: press jumps the owning scroll viewer to that point on the
+        // track, holding drags. (Absorbed before the button check — the track is RepeatButtons.)
+        if (FindAncestor<ScrollBar>(hit) is ScrollBar bar
+            && FindAncestor<ScrollViewer>(bar) is ScrollViewer scrollOwner)
+        {
+            _draggingScrollBar = bar;
+            _draggingScrollViewer = scrollOwner;
+            SetScrollFromCursor(bar, scrollOwner);
             return;
         }
 
@@ -433,6 +483,11 @@ public partial class MainWindow : Window
                     _selectionAnchor = index;
                 }
             }
+
+            // A closed non-editable combo opens on a click anywhere within it. (Editable combos
+            // route text-area clicks to their inner text box and open via the chevron button.)
+            if (input is ComboBox { IsEditable: false, IsDropDownOpen: false } combo)
+                combo.IsDropDownOpen = true;
             return;
         }
 
@@ -452,6 +507,8 @@ public partial class MainWindow : Window
 
         _selectingTextBox = null;
         _draggingSlider = null;
+        _draggingScrollBar = null;
+        _draggingScrollViewer = null;
 
         if (_draggingCard is not null)
         {
@@ -476,14 +533,25 @@ public partial class MainWindow : Window
     /// ScrollViewer (PART_ContentHost) that marks the event handled even with nothing to scroll,
     /// which froze the settings pane whenever the cursor sat over an input field. Skipping
     /// exhausted viewers also hands the notch outward once an inner list hits its end.
+    /// A wheel notch over an open combo dropdown scrolls the popup's list instead.
     /// </summary>
     private void OnInteractiveWheel(int delta)
     {
-        DependencyObject? hit = HitTest(_fakeCursor);
-        if (hit is null)
+        if (FindOpenComboBox(RootCanvas) is ComboBox openCombo
+            && HitTestComboPopup(openCombo) is DependencyObject popupHit)
+        {
+            ScrollNearestScrollable(popupHit, delta);
             return;
+        }
 
-        for (DependencyObject? cur = hit; cur is not null; cur = VisualTreeHelper.GetParent(cur))
+        DependencyObject? hit = HitTest(_fakeCursor);
+        if (hit is not null)
+            ScrollNearestScrollable(hit, delta);
+    }
+
+    private static void ScrollNearestScrollable(DependencyObject from, int delta)
+    {
+        for (DependencyObject? cur = from; cur is not null; cur = VisualTreeHelper.GetParent(cur))
         {
             if (cur is ScrollViewer scroller && CanScroll(scroller, delta))
             {
@@ -496,6 +564,43 @@ public partial class MainWindow : Window
         static bool CanScroll(ScrollViewer scroller, int delta) => delta > 0
             ? scroller.VerticalOffset > 0
             : scroller.VerticalOffset < scroller.ScrollableHeight;
+    }
+
+    // ---- ComboBox dropdown support ----------------------------------------------------------
+
+    /// <summary>
+    /// Finds the ComboBox whose dropdown is currently open, if any (WPF opens at most one).
+    /// The dropdown lives in a separate popup window, so canvas hit-testing never reaches it;
+    /// the press/wheel handlers ask this first and hit-test the popup explicitly.
+    /// </summary>
+    private static ComboBox? FindOpenComboBox(DependencyObject node)
+    {
+        if (node is ComboBox { IsDropDownOpen: true } combo)
+            return combo;
+
+        int count = VisualTreeHelper.GetChildrenCount(node);
+        for (int i = 0; i < count; i++)
+        {
+            if (FindOpenComboBox(VisualTreeHelper.GetChild(node, i)) is ComboBox found)
+                return found;
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Hit-tests an open combo's dropdown popup at the fake-cursor position. The popup has its
+    /// own HWND and visual tree, so the point is routed through screen coordinates.
+    /// </summary>
+    private DependencyObject? HitTestComboPopup(ComboBox combo)
+    {
+        if (combo.Template.FindName("PART_Popup", combo) is not Popup { Child: UIElement child })
+            return null;
+        if (PresentationSource.FromVisual(child) is null)
+            return null;
+
+        Point screen = RootCanvas.PointToScreen(_fakeCursor);
+        Point local = child.PointFromScreen(screen);
+        return VisualTreeHelper.HitTest(child, local)?.VisualHit;
     }
 
     // ---- Fake-cursor helpers --------------------------------------------------------------
@@ -543,6 +648,26 @@ public partial class MainWindow : Window
         Point local = RootCanvas.TranslatePoint(_fakeCursor, slider);
         double fraction = Math.Clamp(local.X / slider.ActualWidth, 0, 1);
         slider.Value = slider.Minimum + fraction * (slider.Maximum - slider.Minimum);
+    }
+
+    // Maps the fake cursor's position along a scrollbar's track onto its owner's scroll offset.
+    private void SetScrollFromCursor(ScrollBar bar, ScrollViewer owner)
+    {
+        Point local = RootCanvas.TranslatePoint(_fakeCursor, bar);
+        if (bar.Orientation == Orientation.Vertical)
+        {
+            if (bar.ActualHeight <= 0)
+                return;
+            double fraction = Math.Clamp(local.Y / bar.ActualHeight, 0, 1);
+            owner.ScrollToVerticalOffset(fraction * owner.ScrollableHeight);
+        }
+        else
+        {
+            if (bar.ActualWidth <= 0)
+                return;
+            double fraction = Math.Clamp(local.X / bar.ActualWidth, 0, 1);
+            owner.ScrollToHorizontalOffset(fraction * owner.ScrollableWidth);
+        }
     }
 
     // Extends the active text-box selection from the press anchor to the character under the cursor.
