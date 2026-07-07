@@ -23,6 +23,7 @@ using ComboBox = System.Windows.Controls.ComboBox;
 using TextBox = System.Windows.Controls.TextBox;
 using ScrollBar = System.Windows.Controls.Primitives.ScrollBar;
 using Orientation = System.Windows.Controls.Orientation;
+using ToolTip = System.Windows.Controls.ToolTip;
 
 namespace RavenAI.Views;
 
@@ -48,6 +49,8 @@ public partial class MainWindow : Window
 
     // Fake-cursor position, in RootCanvas (device-independent) coordinates.
     private Point _fakeCursor;
+    // The topmost window that paints the fake cursor (created on first interactive entry).
+    private FakeCursorWindow? _cursorWindow;
     // The card whose title bar the fake cursor is currently dragging (null when not dragging).
     private Border? _draggingCard;
     // The button pressed by the fake cursor, invoked on release if still under the cursor.
@@ -100,6 +103,7 @@ public partial class MainWindow : Window
 
         DataContext = _vm;
         InitializeComponent();
+        ProtectPopupsFromCapture();
 
         // Keep the log panel pinned to the newest entry as errors/events stream in.
         _vm.Log.Entries.CollectionChanged += (_, e) =>
@@ -234,6 +238,66 @@ public partial class MainWindow : Window
 
     // ---- Screen-capture protection --------------------------------------------------------
 
+    // Combo dropdowns and tooltips open in their own top-level popup HWNDs, which do NOT
+    // inherit the overlay's display affinity — without this they would be the one part of the
+    // UI visible in screen shares. Excluded per-popup as each one opens. No-op in Debug builds,
+    // where capture protection is intentionally disabled.
+
+#if !DEBUG
+    private static bool _toolTipCaptureHandlerRegistered;
+#endif
+
+    private void ProtectPopupsFromCapture()
+    {
+#if !DEBUG
+        // The logical tree (unlike the visual tree) also reaches combos inside unselected tabs.
+        foreach (ComboBox combo in FindLogicalDescendants<ComboBox>(this))
+        {
+            ComboBox c = combo;
+            c.DropDownOpened += (_, _) =>
+                // The popup's HWND is created as part of opening; defer until it exists.
+                Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () =>
+                    ExcludePopupVisualFromCapture(
+                        (c.Template.FindName("PART_Popup", c) as Popup)?.Child));
+        }
+
+        if (!_toolTipCaptureHandlerRegistered)
+        {
+            _toolTipCaptureHandlerRegistered = true;
+            // Fully qualified: inside a Window subclass, `ToolTip` binds to the inherited
+            // FrameworkElement.ToolTip property rather than the control type.
+            EventManager.RegisterClassHandler(typeof(ToolTip),
+                System.Windows.Controls.ToolTip.OpenedEvent,
+                new RoutedEventHandler((sender, _) => ExcludePopupVisualFromCapture(sender as Visual)));
+        }
+#endif
+    }
+
+    private static void ExcludePopupVisualFromCapture(Visual? popupContent)
+    {
+        if (popupContent is null || PresentationSource.FromVisual(popupContent) is not HwndSource src)
+            return;
+        if (!NativeCaptureProtection.Apply(
+                src.Handle, NativeCaptureProtection.WDA_EXCLUDEFROMCAPTURE, out int error))
+        {
+            Services.Logging.Log.Warning(
+                $"Popup capture exclusion failed (win32={error})", null, "Protection");
+        }
+    }
+
+    private static IEnumerable<T> FindLogicalDescendants<T>(DependencyObject node) where T : DependencyObject
+    {
+        foreach (object child in LogicalTreeHelper.GetChildren(node))
+        {
+            if (child is not DependencyObject dependencyChild)
+                continue;
+            if (dependencyChild is T match)
+                yield return match;
+            foreach (T nested in FindLogicalDescendants<T>(dependencyChild))
+                yield return nested;
+        }
+    }
+
     private void ApplyCaptureProtection(IntPtr hwnd)
     {
         CaptureProtectionResult result = _protection.Protect(hwnd);
@@ -324,6 +388,10 @@ public partial class MainWindow : Window
         if (!IsVisible)
             Show();
 
+        // The cursor floats in its own topmost window so it stays above dropdown popups.
+        _cursorWindow ??= new FakeCursorWindow();
+        _cursorWindow.Show();
+
         // Size the painted arrow to match the real cursor at the current DPI + pointer-size setting.
         UpdateCursorScale();
 
@@ -351,6 +419,7 @@ public partial class MainWindow : Window
             return;
 
         _interactive.Exit();   // releases the cursor clip and restores the previous foreground app
+        _cursorWindow?.Hide();
         _draggingCard = null;
         _pressedButton = null;
         _selectingTextBox = null;
@@ -607,9 +676,12 @@ public partial class MainWindow : Window
 
     private void MoveFakeCursor()
     {
-        // The arrow's tip is authored at (0,0), so the translate is simply the cursor position.
-        FakeCursorTransform.X = _fakeCursor.X;
-        FakeCursorTransform.Y = _fakeCursor.Y;
+        // The arrow's tip is authored at (0,0), so the cursor window's origin goes exactly on
+        // the fake-cursor point (converted to physical screen pixels).
+        if (_cursorWindow is null || PresentationSource.FromVisual(RootCanvas) is null)
+            return;
+        Point screen = RootCanvas.PointToScreen(_fakeCursor);
+        _cursorWindow.MoveTo((int)Math.Round(screen.X), (int)Math.Round(screen.Y));
     }
 
     // Scales the vector arrow to match the real cursor's on-screen size. The real cursor's physical
@@ -631,8 +703,7 @@ public partial class MainWindow : Window
         int baseSize = NativePointer.GetCursorBaseSize();
 
         double scale = baseSize * monitorScale / (32.0 * windowScale) * CursorSizeScale;
-        FakeCursorScale.ScaleX = scale;
-        FakeCursorScale.ScaleY = scale;
+        _cursorWindow?.SetScale(scale);
 
         // Diagnostic: surfaces the real numbers in the Logs panel so cursor sizing can be verified.
         Services.Logging.Log.Info(
@@ -896,6 +967,7 @@ public partial class MainWindow : Window
         _hotkeys.Dispose();
         _capture.Dispose();
         _vm.Speech.Dispose();
+        _cursorWindow?.Close();
         _hiddenOwner?.Close();
         base.OnClosing(e);
         Application.Current.Shutdown();
