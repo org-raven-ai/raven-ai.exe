@@ -386,6 +386,14 @@ public partial class MainWindow : Window
         if (_pressedButton is not null)
             return;
 
+        // A settings-tab header: TabItem is not a ButtonBase, so the button dispatch above never
+        // fires for it — select it explicitly (real tab controls also switch on mouse-down).
+        if (FindAncestor<TabItem>(hit) is TabItem tab)
+        {
+            tab.IsSelected = true;
+            return;
+        }
+
         // Give focus to a clicked input control so the keyboard can type into it, and — for a text
         // box — drop the caret at the clicked character and arm drag-to-select.
         Control? input = FindInputControl(hit);
