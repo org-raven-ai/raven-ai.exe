@@ -1,5 +1,4 @@
 using System.Windows;
-using System.Windows.Controls;
 using System.Windows.Interop;
 using System.Windows.Media;
 using RavenAI.Native;
@@ -13,24 +12,33 @@ using Point = System.Windows.Point;
 namespace RavenAI.Views;
 
 /// <summary>
-/// A topmost, click-through, layered window that paints the interactive-mode fake cursor.
+/// A tiny topmost, click-through, layered window that paints the interactive-mode fake cursor.
 ///
 /// The arrow must live in its own top-level window rather than on a canvas inside the overlay:
 /// combo dropdowns and tooltips are separate popup HWNDs that Windows stacks above the overlay,
 /// so a cursor drawn inside the overlay disappears underneath an open dropdown.
 ///
-/// The window spans the whole virtual screen (mirroring the overlay's bounds) and the arrow is
-/// positioned with a render transform. Raw-input mouse moves arrive at up to ~1000 Hz, so the
-/// per-move work must stay this cheap — moving the HWND itself with SetWindowPos per event
-/// backlogs the message queue and the cursor visibly lags and drifts. The window's z-order is
-/// re-asserted only on the rare occasions something could stack above it (interactive entry, a
-/// popup opening). Like the overlay, it is excluded from screen capture (Release builds only).
+/// Presentation is tuned for a 120Hz-class display:
+///  - The window is small, so its layered (UpdateLayeredWindow) surface is trivial — unlike a
+///    virtual-screen-sized layered window, whose 4K re-render throttled motion below the
+///    monitor's refresh rate.
+///  - Raw-input moves (up to ~1000 Hz) only record the target position; the window is actually
+///    repositioned at most once per composed frame, from CompositionTarget.Rendering. Moving the
+///    HWND synchronously per input event backlogged the message queue (start delay + drift).
+///  - Each per-frame reposition inserts at the top of the topmost band, keeping the arrow above
+///    any dropdown popup while it moves.
+///
+/// Like the overlay, the window is excluded from screen capture (Release builds only).
 /// </summary>
 public sealed class FakeCursorWindow : Window
 {
     private readonly ScaleTransform _scale = new(1.0, 1.0);
-    private readonly TranslateTransform _translate = new(0, 0);
     private IntPtr _hwnd;
+
+    // Latest requested tip position in physical screen pixels, applied on the next frame.
+    private int _targetX;
+    private int _targetY;
+    private bool _moveRequested;
 
     public FakeCursorWindow()
     {
@@ -44,30 +52,33 @@ public sealed class FakeCursorWindow : Window
         IsHitTestVisible = false;
         Focusable = false;
         WindowStartupLocation = WindowStartupLocation.Manual;
+        // Generously sized so the arrow never clips at large pointer sizes / DPI scales.
+        Width = 100;
+        Height = 100;
+        Left = 0;
+        Top = 0;
 
-        // Mirror the overlay's bounds exactly, so fake-cursor canvas coordinates map 1:1.
-        Left = SystemParameters.VirtualScreenLeft;
-        Top = SystemParameters.VirtualScreenTop;
-        Width = SystemParameters.VirtualScreenWidth;
-        Height = SystemParameters.VirtualScreenHeight;
-
-        // The same vector arrow the overlay used to paint: tip at (0,0), authored for a
-        // 32px cursor. Scale sizes it to the real pointer; translate follows the fake cursor.
-        var arrow = new Path
+        // The same vector arrow the overlay used to paint: tip at (0,0) = the window origin,
+        // authored for a 32px cursor; the scale transform sizes it to match the real pointer.
+        Content = new Path
         {
             Fill = Brushes.White,
             Stroke = new SolidColorBrush(Color.FromRgb(0x20, 0x20, 0x24)),
             StrokeThickness = 1,
             Data = Geometry.Parse("M 0,0 L 0,17 L 4.5,13 L 7.5,19.5 L 10,18.3 L 7,12 L 12.5,12 Z"),
+            RenderTransform = _scale,
+            HorizontalAlignment = HorizontalAlignment.Left,
+            VerticalAlignment = VerticalAlignment.Top,
         };
-        var group = new TransformGroup();
-        group.Children.Add(_scale);
-        group.Children.Add(_translate);
-        arrow.RenderTransform = group;
 
-        var canvas = new Canvas { IsHitTestVisible = false };
-        canvas.Children.Add(arrow);
-        Content = canvas;
+        // The per-frame pump only runs while the cursor is on screen.
+        IsVisibleChanged += (_, e) =>
+        {
+            if ((bool)e.NewValue)
+                CompositionTarget.Rendering += OnFrameRendering;
+            else
+                CompositionTarget.Rendering -= OnFrameRendering;
+        };
     }
 
     protected override void OnSourceInitialized(EventArgs e)
@@ -97,22 +108,32 @@ public sealed class FakeCursorWindow : Window
     }
 
     /// <summary>
-    /// Puts the arrow's tip at the given point (in the overlay canvas's DIU coordinates, which
-    /// map 1:1 onto this window). Pure render-transform update — cheap enough for raw-input rate.
+    /// Requests the arrow's tip at the given physical-pixel screen point. Cheap enough for
+    /// raw-input rate — the window itself moves on the next composed frame.
     /// </summary>
-    public void MoveTo(Point position)
+    public void MoveTo(Point screenPixels)
     {
-        _translate.X = position.X;
-        _translate.Y = position.Y;
+        _targetX = (int)Math.Round(screenPixels.X);
+        _targetY = (int)Math.Round(screenPixels.Y);
+        _moveRequested = true;
     }
 
     /// <summary>
     /// Re-asserts this window at the top of the topmost band, above popups that opened after it
-    /// (WPF dropdowns/tooltips of a topmost window are themselves topmost).
+    /// (WPF dropdowns/tooltips of a topmost window are themselves topmost). Movement does this
+    /// implicitly each frame; this covers popups opening while the cursor is stationary.
     /// </summary>
     public void BumpAbovePopups()
     {
         if (_hwnd != IntPtr.Zero)
             NativeWindowStyle.BumpTopmost(_hwnd);
+    }
+
+    private void OnFrameRendering(object? sender, EventArgs e)
+    {
+        if (!_moveRequested || _hwnd == IntPtr.Zero)
+            return;
+        _moveRequested = false;
+        NativeWindowStyle.MoveTopmost(_hwnd, _targetX, _targetY);
     }
 }

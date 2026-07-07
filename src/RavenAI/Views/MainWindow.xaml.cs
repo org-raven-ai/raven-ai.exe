@@ -685,9 +685,11 @@ public partial class MainWindow : Window
 
     private void MoveFakeCursor()
     {
-        // The cursor window mirrors the overlay's bounds, so canvas coordinates map 1:1. This
-        // runs per raw-input packet (up to ~1000 Hz) — it must stay a pure transform update.
-        _cursorWindow?.MoveTo(_fakeCursor);
+        // Runs per raw-input packet (up to ~1000 Hz): convert to screen pixels and record the
+        // target — the cursor window repositions itself once per composed frame.
+        if (_cursorWindow is null || PresentationSource.FromVisual(RootCanvas) is null)
+            return;
+        _cursorWindow.MoveTo(RootCanvas.PointToScreen(_fakeCursor));
     }
 
     // Scales the vector arrow to match the real cursor's on-screen size. The real cursor's physical
