@@ -83,6 +83,16 @@ public partial class MainWindow : Window
     private ScrollBar? _draggingScrollBar;
     private ScrollViewer? _draggingScrollViewer;
 
+    // Drag work accumulates here between frames and is applied once per composed frame
+    // (OnInteractiveFrame): raw input arrives far faster (~1000 Hz) than frames are composed,
+    // and card moves / slider updates per event backlog the dispatcher — the visible lag-and-
+    // drift. The card's drop shadow is also suspended while dragging: effects inflate the
+    // re-rendered region of the layered overlay on every frame.
+    private double _pendingDragDx;
+    private double _pendingDragDy;
+    private bool _pointerDragUpdateRequested;
+    private System.Windows.Media.Effects.Effect? _draggedCardEffect;
+
     // Virtual-key codes for the hotkeys.
     private const uint VK_SPACE = 0x20;
     private const uint VK_V = 0x56;
@@ -412,7 +422,13 @@ public partial class MainWindow : Window
         _draggingCard = null;
         _pressedButton = null;
         _selectingTextBox = null;
+        _pendingDragDx = _pendingDragDy = 0;
+        _pointerDragUpdateRequested = false;
         _vm.IsInteractive = true;
+
+        // Drags are applied per composed frame, not per raw-input event.
+        System.Windows.Media.CompositionTarget.Rendering -= OnInteractiveFrame;
+        System.Windows.Media.CompositionTarget.Rendering += OnInteractiveFrame;
 
         // Capture input + freeze the real cursor BEFORE we take the foreground, so the
         // controller records the app the user came from (to restore focus on exit).
@@ -428,11 +444,23 @@ public partial class MainWindow : Window
             return;
 
         _interactive.Exit();   // releases the cursor clip and restores the previous foreground app
+        System.Windows.Media.CompositionTarget.Rendering -= OnInteractiveFrame;
         _cursorWindow?.Hide();
+        RestoreDraggedCardEffect();
         _draggingCard = null;
         _pressedButton = null;
         _selectingTextBox = null;
+        _pendingDragDx = _pendingDragDy = 0;
+        _pointerDragUpdateRequested = false;
         _vm.IsInteractive = false;
+    }
+
+    // Puts the drop shadow back on the card whose drag suspended it.
+    private void RestoreDraggedCardEffect()
+    {
+        if (_draggingCard is not null && _draggedCardEffect is not null)
+            _draggingCard.Effect = _draggedCardEffect;
+        _draggedCardEffect = null;
     }
 
     /// <summary>
@@ -452,25 +480,40 @@ public partial class MainWindow : Window
         _fakeCursor = ClampToCanvas(new Point(_fakeCursor.X + dx, _fakeCursor.Y + dy));
         MoveFakeCursor();
 
+        // Only record what the drag wants; OnInteractiveFrame applies it once per frame.
         if (_draggingCard is not null)
         {
-            MoveCardBy(_draggingCard, dx, dy);
+            _pendingDragDx += dx;
+            _pendingDragDy += dy;
             return;
         }
+
+        if (_draggingSlider is not null || _draggingScrollBar is not null || _selectingTextBox is not null)
+            _pointerDragUpdateRequested = true;
+    }
+
+    /// <summary>
+    /// Applies the drag work accumulated since the last composed frame. Subscribed to
+    /// <see cref="System.Windows.Media.CompositionTarget.Rendering"/> only while interactive.
+    /// </summary>
+    private void OnInteractiveFrame(object? sender, EventArgs e)
+    {
+        if (_draggingCard is not null && (_pendingDragDx != 0 || _pendingDragDy != 0))
+        {
+            MoveCardBy(_draggingCard, _pendingDragDx, _pendingDragDy);
+            _pendingDragDx = 0;
+            _pendingDragDy = 0;
+        }
+
+        if (!_pointerDragUpdateRequested)
+            return;
+        _pointerDragUpdateRequested = false;
 
         if (_draggingSlider is not null)
-        {
             SetSliderValueFromCursor(_draggingSlider);
-            return;
-        }
-
-        if (_draggingScrollBar is not null && _draggingScrollViewer is not null)
-        {
+        else if (_draggingScrollBar is not null && _draggingScrollViewer is not null)
             SetScrollFromCursor(_draggingScrollBar, _draggingScrollViewer);
-            return;
-        }
-
-        if (_selectingTextBox is not null)
+        else if (_selectingTextBox is not null)
             ExtendTextSelection(_selectingTextBox);
     }
 
@@ -576,6 +619,15 @@ public partial class MainWindow : Window
             _draggingCard = StagingCard;
         else if (IsWithin(hit, GateTitleBar))
             _draggingCard = GateCard;
+
+        if (_draggingCard is not null)
+        {
+            _pendingDragDx = _pendingDragDy = 0;
+            // Suspend the drop shadow for the drag: the effect inflates the region of the
+            // layered overlay that must re-render on every frame of movement.
+            _draggedCardEffect = _draggingCard.Effect;
+            _draggingCard.Effect = null;
+        }
     }
 
     private void OnInteractiveButtonReleased(OverlayMouseButton button)
@@ -590,6 +642,11 @@ public partial class MainWindow : Window
 
         if (_draggingCard is not null)
         {
+            // Apply whatever movement is still pending, then bring the shadow back.
+            if (_pendingDragDx != 0 || _pendingDragDy != 0)
+                MoveCardBy(_draggingCard, _pendingDragDx, _pendingDragDy);
+            _pendingDragDx = _pendingDragDy = 0;
+            RestoreDraggedCardEffect();
             _draggingCard = null;
             return;
         }
