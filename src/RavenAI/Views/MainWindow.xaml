@@ -22,7 +22,62 @@
 
          Two draggable cards sit side by side on RootCanvas: the transcription-staging window (left)
          and the agent chat window (right). Both share this single overlay HWND, so both inherit the
-         capture exclusion and are clickable by the fake cursor in interactive mode. -->
+         capture exclusion and are clickable by the fake cursor in interactive mode.
+
+         Visual language: "night instrument" (Themes/NightInstrument.xaml). Cyan = the interviewer
+         channel, violet = you; the pairing repeats in channels, bubbles, and avatars. -->
+
+    <Window.Resources>
+        <!-- Blinking live-caret used inside interim transcript bubbles -->
+        <Style x:Key="LiveCaret" TargetType="Border">
+            <Setter Property="Width" Value="6" />
+            <Setter Property="Height" Value="12" />
+            <Setter Property="Background" Value="{StaticResource CyanBrush}" />
+            <Style.Triggers>
+                <EventTrigger RoutedEvent="Loaded">
+                    <BeginStoryboard>
+                        <Storyboard RepeatBehavior="Forever">
+                            <DoubleAnimationUsingKeyFrames Storyboard.TargetProperty="Opacity" Duration="0:0:1">
+                                <DiscreteDoubleKeyFrame KeyTime="0:0:0" Value="1" />
+                                <DiscreteDoubleKeyFrame KeyTime="0:0:0.5" Value="0" />
+                            </DoubleAnimationUsingKeyFrames>
+                        </Storyboard>
+                    </BeginStoryboard>
+                </EventTrigger>
+            </Style.Triggers>
+        </Style>
+
+        <!-- Pulsing "eye" dot inside the Invisible protection pill -->
+        <Style x:Key="PulseDot" TargetType="Ellipse">
+            <Setter Property="Width" Value="6" />
+            <Setter Property="Height" Value="6" />
+            <Setter Property="Fill" Value="{StaticResource OkBrush}" />
+            <Style.Triggers>
+                <EventTrigger RoutedEvent="Loaded">
+                    <BeginStoryboard>
+                        <Storyboard RepeatBehavior="Forever">
+                            <DoubleAnimation Storyboard.TargetProperty="Opacity" From="0.45" To="1"
+                                             Duration="0:0:1.1" AutoReverse="True" />
+                        </Storyboard>
+                    </BeginStoryboard>
+                </EventTrigger>
+            </Style.Triggers>
+        </Style>
+
+        <!-- One audio-channel tile (.chan): ink well, channel-colored icon + name -->
+        <Style x:Key="ChannelTile" TargetType="Border">
+            <Setter Property="Background" Value="{StaticResource Ink2Brush}" />
+            <Setter Property="BorderBrush" Value="{StaticResource Line2Brush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="10" />
+            <Setter Property="Padding" Value="10,8" />
+        </Style>
+
+        <!-- Meta line above a transcript bubble (.line .m) -->
+        <Style x:Key="BubbleMeta" TargetType="TextBlock" BasedOn="{StaticResource MetaText}">
+            <Setter Property="Margin" Value="2,0,2,3" />
+        </Style>
+    </Window.Resources>
 
     <Grid>
         <!-- Faint dim while interactive, so it's obvious input is being captured. Never hit-tested. -->
@@ -30,38 +85,57 @@
                    Visibility="{Binding IsInteractive, Converter={StaticResource BoolToVisibility}}" />
 
         <!-- Absolute-positioned layer for the draggable floating cards. -->
-        <Canvas x:Name="RootCanvas" Background="Transparent">
+        <Canvas x:Name="RootCanvas" Background="Transparent"
+                TextElement.FontFamily="{StaticResource FontMono}"
+                TextElement.Foreground="{StaticResource TextBrush}">
 
             <!-- ============================================================================= -->
             <!-- ===== Transcription-staging card (left; drag its title bar to move) ========= -->
             <!-- ============================================================================= -->
             <!-- Two live channels (system audio → left, microphone → right) transcribe in parallel.
-                 Interim hypotheses show as italic "live" bubbles; once a phrase is committed it
-                 settles into a timestamped message. Send flushes every staged message into the
-                 agent chat and empties this window. -->
+                 Interim hypotheses show as italic hatched "live" bubbles with a blinking caret; once
+                 a phrase is committed it settles into a timestamped message. Send flushes every
+                 staged message into the agent chat and empties this window. -->
             <Border x:Name="StagingCard" Width="400" Height="560"
-                    Background="{StaticResource WindowBg}" CornerRadius="10"
-                    BorderBrush="#3A3A40" BorderThickness="1" DataContext="{Binding Speech}">
+                    Background="{StaticResource CardFaceBrush}" CornerRadius="16"
+                    BorderBrush="{StaticResource LineBrush}" BorderThickness="1"
+                    Visibility="{Binding DataContext.IsGateOpen, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource BoolToVisibility}, ConverterParameter=Invert}"
+                    DataContext="{Binding Speech}">
                 <Border.Effect>
-                    <DropShadowEffect Color="Black" BlurRadius="18" ShadowDepth="0" Opacity="0.5" />
+                    <DropShadowEffect Color="Black" BlurRadius="34" ShadowDepth="6" Direction="270" Opacity="0.6" />
                 </Border.Effect>
                 <Grid>
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />  <!-- title bar -->
-                        <RowDefinition Height="Auto" />  <!-- channel controls -->
+                        <RowDefinition Height="Auto" />  <!-- channel tiles + mic picker -->
                         <RowDefinition Height="*" />     <!-- staged messages -->
                         <RowDefinition Height="Auto" />  <!-- live (interim) bubbles -->
                         <RowDefinition Height="Auto" />  <!-- send / clear -->
                     </Grid.RowDefinitions>
 
                     <!-- Title bar (drag to move via the fake cursor while interactive) -->
-                    <Border x:Name="StagingTitleBar" Grid.Row="0" Background="{StaticResource PanelBg}"
-                            CornerRadius="10,10,0,0">
-                        <TextBlock Text="🎙 Transcription" FontWeight="Bold" FontSize="14" Margin="12,8"
-                                   Foreground="{StaticResource TextBrush}" />
+                    <Border x:Name="StagingTitleBar" Grid.Row="0" Background="{StaticResource TitlebarBrush}"
+                            CornerRadius="15,15,0,0" BorderBrush="{StaticResource Line2Brush}"
+                            BorderThickness="0,0,0,1" Height="38">
+                        <Grid Margin="13,0,8,0">
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                <Viewbox Width="14" Height="14">
+                                    <Path Style="{StaticResource IconPath}" Data="{StaticResource IconMic}"
+                                          Stroke="{StaticResource CyanBrush}" />
+                                </Viewbox>
+                                <TextBlock Margin="9,0,0,0" FontFamily="{StaticResource FontMono}"
+                                           FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center">
+                                    <Run Text="transcription" /><Run Text="_staging"
+                                         Foreground="{StaticResource AccentGradientBrush}" />
+                                </TextBlock>
+                            </StackPanel>
+                        </Grid>
                     </Border>
+                    <!-- gradient hairline along the card's top edge -->
+                    <Rectangle Grid.Row="0" Height="1" VerticalAlignment="Top" Margin="16,0"
+                               Fill="{StaticResource HairlineGradientBrush}" IsHitTestVisible="False" />
 
-                    <!-- Channel controls: start/stop each channel + choose the microphone. -->
+                    <!-- Channel tiles: start/stop each channel + choose the microphone. -->
                     <StackPanel Grid.Row="1" Margin="12,10,12,4">
                         <Grid>
                             <Grid.ColumnDefinitions>
@@ -70,47 +144,97 @@
                                 <ColumnDefinition Width="*" />
                             </Grid.ColumnDefinitions>
 
-                            <!-- System-audio (Interviewer) start/stop + status -->
-                            <StackPanel Grid.Column="0">
-                                <Button Command="{Binding Interviewer.ToggleCommand}" FontWeight="Bold" HorizontalAlignment="Stretch">
-                                    <Button.Style>
-                                        <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
-                                            <Setter Property="Content" Value="▶ System audio" />
-                                            <Style.Triggers>
-                                                <DataTrigger Binding="{Binding Interviewer.IsListening}" Value="True">
-                                                    <Setter Property="Content" Value="■ System audio" />
-                                                    <Setter Property="Background" Value="{StaticResource WarnBrush}" />
-                                                </DataTrigger>
-                                            </Style.Triggers>
-                                        </Style>
-                                    </Button.Style>
-                                </Button>
-                                <TextBlock Text="{Binding Interviewer.Status}" Foreground="{StaticResource SubtleTextBrush}"
-                                           FontSize="11" Margin="2,4,0,0" />
-                            </StackPanel>
+                            <!-- System-audio (Interviewer, cyan) -->
+                            <Border Grid.Column="0" Style="{StaticResource ChannelTile}">
+                                <StackPanel>
+                                    <StackPanel Orientation="Horizontal">
+                                        <Border Width="22" Height="22" CornerRadius="6"
+                                                Background="{StaticResource CyanDimBrush}">
+                                            <Viewbox Width="13" Height="13">
+                                                <Path Style="{StaticResource IconPath}"
+                                                      Data="{StaticResource IconVolume}"
+                                                      Stroke="{StaticResource CyanBrush}" />
+                                            </Viewbox>
+                                        </Border>
+                                        <StackPanel Margin="8,0,0,0" VerticalAlignment="Center">
+                                            <TextBlock Text="Interviewer" FontFamily="{StaticResource FontMono}"
+                                                       FontSize="11" FontWeight="SemiBold"
+                                                       Foreground="{StaticResource CyanBrush}" />
+                                            <TextBlock Text="system audio" FontFamily="{StaticResource FontMono}"
+                                                       FontSize="10" Foreground="{StaticResource Text3Brush}" />
+                                        </StackPanel>
+                                    </StackPanel>
+                                    <TextBlock Text="{Binding Interviewer.Status}" Margin="0,7,0,0"
+                                               FontFamily="{StaticResource FontMono}" FontSize="10"
+                                               Foreground="{StaticResource Text3Brush}"
+                                               TextTrimming="CharacterEllipsis"
+                                               ToolTip="{Binding Interviewer.Status}" />
+                                    <Button Command="{Binding Interviewer.ToggleCommand}" Margin="0,7,0,0"
+                                            HorizontalAlignment="Stretch" Padding="10,6">
+                                        <Button.Style>
+                                            <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+                                                <Setter Property="Content" Value="▶  Start" />
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding Interviewer.IsListening}" Value="True">
+                                                        <Setter Property="Content" Value="■  Stop" />
+                                                        <Setter Property="Foreground" Value="{StaticResource CritBrush}" />
+                                                        <Setter Property="BorderBrush" Value="{StaticResource CritBorderBrush}" />
+                                                        <Setter Property="Background" Value="{StaticResource CritDimBrush}" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </Button.Style>
+                                    </Button>
+                                </StackPanel>
+                            </Border>
 
-                            <!-- Microphone (You) start/stop + status -->
-                            <StackPanel Grid.Column="2">
-                                <Button Command="{Binding You.ToggleCommand}" FontWeight="Bold" HorizontalAlignment="Stretch">
-                                    <Button.Style>
-                                        <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
-                                            <Setter Property="Content" Value="▶ Microphone" />
-                                            <Style.Triggers>
-                                                <DataTrigger Binding="{Binding You.IsListening}" Value="True">
-                                                    <Setter Property="Content" Value="■ Microphone" />
-                                                    <Setter Property="Background" Value="{StaticResource WarnBrush}" />
-                                                </DataTrigger>
-                                            </Style.Triggers>
-                                        </Style>
-                                    </Button.Style>
-                                </Button>
-                                <TextBlock Text="{Binding You.Status}" Foreground="{StaticResource SubtleTextBrush}"
-                                           FontSize="11" Margin="2,4,0,0" />
-                            </StackPanel>
+                            <!-- Microphone (You, violet) -->
+                            <Border Grid.Column="2" Style="{StaticResource ChannelTile}">
+                                <StackPanel>
+                                    <StackPanel Orientation="Horizontal">
+                                        <Border Width="22" Height="22" CornerRadius="6"
+                                                Background="{StaticResource VioletDimBrush}">
+                                            <Viewbox Width="13" Height="13">
+                                                <Path Style="{StaticResource IconPath}"
+                                                      Data="{StaticResource IconMic}"
+                                                      Stroke="{StaticResource VioletBrush}" />
+                                            </Viewbox>
+                                        </Border>
+                                        <StackPanel Margin="8,0,0,0" VerticalAlignment="Center">
+                                            <TextBlock Text="You" FontFamily="{StaticResource FontMono}"
+                                                       FontSize="11" FontWeight="SemiBold"
+                                                       Foreground="{StaticResource VioletBrush}" />
+                                            <TextBlock Text="microphone" FontFamily="{StaticResource FontMono}"
+                                                       FontSize="10" Foreground="{StaticResource Text3Brush}" />
+                                        </StackPanel>
+                                    </StackPanel>
+                                    <TextBlock Text="{Binding You.Status}" Margin="0,7,0,0"
+                                               FontFamily="{StaticResource FontMono}" FontSize="10"
+                                               Foreground="{StaticResource Text3Brush}"
+                                               TextTrimming="CharacterEllipsis"
+                                               ToolTip="{Binding You.Status}" />
+                                    <Button Command="{Binding You.ToggleCommand}" Margin="0,7,0,0"
+                                            HorizontalAlignment="Stretch" Padding="10,6">
+                                        <Button.Style>
+                                            <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+                                                <Setter Property="Content" Value="▶  Start" />
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding You.IsListening}" Value="True">
+                                                        <Setter Property="Content" Value="■  Stop" />
+                                                        <Setter Property="Foreground" Value="{StaticResource CritBrush}" />
+                                                        <Setter Property="BorderBrush" Value="{StaticResource CritBorderBrush}" />
+                                                        <Setter Property="Background" Value="{StaticResource CritDimBrush}" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </Button.Style>
+                                    </Button>
+                                </StackPanel>
+                            </Border>
                         </Grid>
 
                         <!-- Microphone picker: disabled while listening (a restart is needed to switch). -->
-                        <Grid Margin="0,8,0,0" IsEnabled="{Binding You.CanSelectMicrophone}">
+                        <Grid Margin="0,10,0,0" IsEnabled="{Binding You.CanSelectMicrophone}">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*" />
                                 <ColumnDefinition Width="Auto" />
@@ -118,72 +242,112 @@
                             <ComboBox Grid.Column="0" ItemsSource="{Binding You.Microphones}"
                                       SelectedItem="{Binding You.SelectedMicrophone, Mode=TwoWay}"
                                       DisplayMemberPath="Name" ToolTip="Choose which microphone to listen to" />
-                            <Button Grid.Column="1" Content="⟳" Command="{Binding You.RefreshMicrophonesCommand}"
-                                    Margin="6,0,0,0" Padding="10,4" ToolTip="Refresh microphone list" />
+                            <Button Grid.Column="1" Style="{StaticResource IconButton}"
+                                    Command="{Binding You.RefreshMicrophonesCommand}" Margin="6,0,0,0"
+                                    VerticalAlignment="Center" ToolTip="Refresh microphone list">
+                                <Viewbox Width="14" Height="14">
+                                    <Path Style="{StaticResource IconPath}" Data="{StaticResource IconRefresh}"
+                                          Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" />
+                                </Viewbox>
+                            </Button>
                         </Grid>
                     </StackPanel>
 
-                    <!-- Staged (committed) messages: system audio left, microphone right, in completion order. -->
-                    <ScrollViewer Grid.Row="2" x:Name="StagingScroll" Margin="8,6" VerticalScrollBarVisibility="Auto">
+                    <!-- Staged (committed) messages: system audio left/cyan, microphone right/violet. -->
+                    <!-- Background=Transparent so the fake cursor's hit-test resolves inside the
+                         viewer even over the empty space around bubbles — hit-testing is how the
+                         wheel/scrollbar handlers find which ScrollViewer to drive. -->
+                    <ScrollViewer Grid.Row="2" x:Name="StagingScroll" Margin="8,6"
+                                  Background="Transparent"
+                                  VerticalScrollBarVisibility="Auto">
                         <ItemsControl ItemsSource="{Binding Staged}">
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate>
-                                    <StackPanel Margin="4,3"
+                                    <StackPanel Margin="4,4"
                                                 HorizontalAlignment="{Binding IsMic, Converter={StaticResource BoolToAlignment}}">
-                                        <Border Padding="10,8" CornerRadius="10" MaxWidth="300"
-                                                Background="{Binding IsMic, Converter={StaticResource BoolToBubbleBrush}}">
-                                            <StackPanel>
-                                                <TextBlock Text="{Binding Speaker}" FontSize="10" FontWeight="Bold"
-                                                           Foreground="{StaticResource SubtleTextBrush}" Margin="0,0,0,2" />
-                                                <TextBlock Text="{Binding Text}" TextWrapping="Wrap"
-                                                           Foreground="{StaticResource TextBrush}" FontSize="13" />
-                                            </StackPanel>
+                                        <TextBlock Style="{StaticResource BubbleMeta}"
+                                                   HorizontalAlignment="{Binding IsMic, Converter={StaticResource BoolToAlignment}}">
+                                            <Run Text="{Binding Speaker, Mode=OneWay}" /><Run Text=" · " /><Run
+                                                 Text="{Binding TimeText, Mode=OneWay}" />
+                                        </TextBlock>
+                                        <Border x:Name="Bub" Padding="11,8" MaxWidth="300"
+                                                CornerRadius="11,11,11,4"
+                                                Background="{StaticResource ThemBubbleBrush}"
+                                                BorderBrush="{StaticResource ThemBubbleBorderBrush}"
+                                                BorderThickness="1">
+                                            <TextBlock Text="{Binding Text}" TextWrapping="Wrap" FontSize="13"
+                                                       LineHeight="19" Foreground="{StaticResource TextBrush}" />
                                         </Border>
-                                        <TextBlock Text="{Binding TimeText}" FontSize="10" Margin="4,1,4,0"
-                                                   Foreground="{StaticResource SubtleTextBrush}"
-                                                   HorizontalAlignment="{Binding IsMic, Converter={StaticResource BoolToAlignment}}" />
                                     </StackPanel>
+                                    <DataTemplate.Triggers>
+                                        <DataTrigger Binding="{Binding IsMic}" Value="True">
+                                            <Setter TargetName="Bub" Property="CornerRadius" Value="11,11,4,11" />
+                                            <Setter TargetName="Bub" Property="Background"
+                                                    Value="{StaticResource YouBubbleBrush}" />
+                                            <Setter TargetName="Bub" Property="BorderBrush"
+                                                    Value="{StaticResource YouBubbleBorderBrush}" />
+                                        </DataTrigger>
+                                    </DataTemplate.Triggers>
                                 </DataTemplate>
                             </ItemsControl.ItemTemplate>
                         </ItemsControl>
                     </ScrollViewer>
 
-                    <!-- Live interim bubbles: one per channel, shown only while that channel has an in-progress
-                         hypothesis. They vanish as the phrase settles into a staged message above. -->
+                    <!-- Live interim bubbles: one per channel, hatched + italic with a blinking caret,
+                         shown only while that channel has an in-progress hypothesis. -->
                     <StackPanel Grid.Row="3" Margin="12,0,12,4">
-                        <Border HorizontalAlignment="Left" Padding="10,8" CornerRadius="10" MaxWidth="300" Margin="0,2"
-                                Background="{StaticResource PanelBg}" BorderBrush="#3A3A40" BorderThickness="1"
-                                Visibility="{Binding Interviewer.InterimText, Converter={StaticResource StringToVisibility}}">
-                            <StackPanel>
-                                <TextBlock Text="Interviewer · live" FontSize="10" FontWeight="Bold"
-                                           Foreground="{StaticResource SubtleTextBrush}" Margin="0,0,0,2" />
-                                <TextBlock Text="{Binding Interviewer.InterimText}" TextWrapping="Wrap" FontStyle="Italic"
-                                           Foreground="{StaticResource SubtleTextBrush}" FontSize="13" />
-                            </StackPanel>
-                        </Border>
-                        <Border HorizontalAlignment="Right" Padding="10,8" CornerRadius="10" MaxWidth="300" Margin="0,2"
-                                Background="{StaticResource PanelBg}" BorderBrush="#3A3A40" BorderThickness="1"
-                                Visibility="{Binding You.InterimText, Converter={StaticResource StringToVisibility}}">
-                            <StackPanel>
-                                <TextBlock Text="You · live" FontSize="10" FontWeight="Bold"
-                                           Foreground="{StaticResource SubtleTextBrush}" Margin="0,0,0,2" />
-                                <TextBlock Text="{Binding You.InterimText}" TextWrapping="Wrap" FontStyle="Italic"
-                                           Foreground="{StaticResource SubtleTextBrush}" FontSize="13" />
-                            </StackPanel>
-                        </Border>
+                        <StackPanel HorizontalAlignment="Left" Margin="0,2"
+                                    Visibility="{Binding Interviewer.InterimText, Converter={StaticResource StringToVisibility}}">
+                            <TextBlock Style="{StaticResource BubbleMeta}" Text="Interviewer · live" />
+                            <Border Padding="11,8" MaxWidth="300" CornerRadius="11,11,11,4"
+                                    Background="{StaticResource InterimHatchBrush}"
+                                    BorderBrush="{StaticResource ThemBubbleBorderBrush}" BorderThickness="1">
+                                <TextBlock TextWrapping="Wrap" FontSize="13" FontStyle="Italic"
+                                           Foreground="{StaticResource Text2Brush}">
+                                    <Run Text="{Binding Interviewer.InterimText, Mode=OneWay}" /><InlineUIContainer
+                                        BaselineAlignment="Center"><Border Style="{StaticResource LiveCaret}"
+                                                                           Margin="3,0,0,0" /></InlineUIContainer>
+                                </TextBlock>
+                            </Border>
+                        </StackPanel>
+                        <StackPanel HorizontalAlignment="Right" Margin="0,2"
+                                    Visibility="{Binding You.InterimText, Converter={StaticResource StringToVisibility}}">
+                            <TextBlock Style="{StaticResource BubbleMeta}" Text="live · You"
+                                       HorizontalAlignment="Right" />
+                            <Border Padding="11,8" MaxWidth="300" CornerRadius="11,11,4,11"
+                                    Background="{StaticResource InterimHatchBrush}"
+                                    BorderBrush="{StaticResource YouBubbleBorderBrush}" BorderThickness="1">
+                                <TextBlock TextWrapping="Wrap" FontSize="13" FontStyle="Italic"
+                                           Foreground="{StaticResource Text2Brush}">
+                                    <Run Text="{Binding You.InterimText, Mode=OneWay}" /><InlineUIContainer
+                                        BaselineAlignment="Center"><Border Style="{StaticResource LiveCaret}"
+                                                                           Background="{StaticResource VioletBrush}"
+                                                                           Margin="3,0,0,0" /></InlineUIContainer>
+                                </TextBlock>
+                            </Border>
+                        </StackPanel>
                     </StackPanel>
 
-                    <!-- Send / Clear the staged batch. -->
+                    <!-- Send / Clear the staged batch. Primary is the view's one gradient action. -->
                     <Grid Grid.Row="4" Margin="12,4,12,12">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
-                        <Button Grid.Column="0" Content="Clear" Command="{Binding ClearStagedCommand}" Background="#555" />
-                        <Button Grid.Column="2" Content="Send to agent →" Command="{Binding SendCommand}"
-                                FontWeight="Bold"
-                                ToolTip="Send all staged transcriptions to the assistant and clear this window" />
+                        <Button Grid.Column="0" Content="Clear" Style="{StaticResource GhostButton}"
+                                Command="{Binding ClearStagedCommand}" />
+                        <Button Grid.Column="2" Style="{StaticResource PrimaryButton}"
+                                Command="{Binding SendCommand}"
+                                ToolTip="Send all staged transcriptions to the assistant and clear this window">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="Stage to agent" FontWeight="SemiBold" />
+                                <Viewbox Width="14" Height="14" Margin="7,0,0,0">
+                                    <Path Style="{StaticResource IconPath}" Data="{StaticResource IconArrowRight}"
+                                          Stroke="#0A0710" StrokeThickness="2.4" />
+                                </Viewbox>
+                            </StackPanel>
+                        </Button>
                     </Grid>
                 </Grid>
             </Border>
@@ -191,11 +355,12 @@
             <!-- ============================================================================= -->
             <!-- ===== Agent chat card (right; drag its title bar to move) =================== -->
             <!-- ============================================================================= -->
-            <Border x:Name="ChatCard" Width="420" Height="560"
-                    Background="{StaticResource WindowBg}" CornerRadius="10"
-                    BorderBrush="#3A3A40" BorderThickness="1">
+            <Border x:Name="ChatCard" Width="520" Height="560"
+                    Background="{StaticResource CardFaceBrush}" CornerRadius="16"
+                    BorderBrush="{StaticResource LineBrush}" BorderThickness="1"
+                    Visibility="{Binding IsGateOpen, Converter={StaticResource BoolToVisibility}, ConverterParameter=Invert}">
                 <Border.Effect>
-                    <DropShadowEffect Color="Black" BlurRadius="18" ShadowDepth="0" Opacity="0.5" />
+                    <DropShadowEffect Color="Black" BlurRadius="34" ShadowDepth="6" Direction="270" Opacity="0.6" />
                 </Border.Effect>
                 <Grid>
                     <Grid.RowDefinitions>
@@ -204,10 +369,11 @@
                         <RowDefinition Height="*" />     <!-- chat / settings / logs -->
                     </Grid.RowDefinitions>
 
-                    <!-- ===== Title bar (drag to move via the fake cursor while interactive) ===== -->
-                    <Border x:Name="ChatTitleBar" Grid.Row="0" Background="{StaticResource PanelBg}"
-                            CornerRadius="10,10,0,0">
-                        <Grid Margin="10,6">
+                    <!-- ===== Title bar: brand, protection pill, interactive badge, actions ===== -->
+                    <Border x:Name="ChatTitleBar" Grid.Row="0" Background="{StaticResource TitlebarBrush}"
+                            CornerRadius="15,15,0,0" BorderBrush="{StaticResource Line2Brush}"
+                            BorderThickness="0,0,0,1" Height="38">
+                        <Grid Margin="13,0,8,0">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="Auto" />
                                 <ColumnDefinition Width="*" />
@@ -215,41 +381,117 @@
                             </Grid.ColumnDefinitions>
 
                             <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                                <TextBlock Text="🛡 raven_ai" FontWeight="Bold" FontSize="14"
-                                           Foreground="{StaticResource TextBrush}" VerticalAlignment="Center" />
-                                <Ellipse Width="8" Height="8" Margin="8,0,0,0" VerticalAlignment="Center"
-                                         Fill="{Binding IsFullyHidden, Converter={StaticResource BoolToBubbleBrush}}"
-                                         ToolTip="{Binding ProtectionStatus}" />
-                                <Border Margin="8,0,0,0" Padding="6,1" CornerRadius="4"
-                                        Background="{StaticResource AccentBrush}"
+                                <!-- Raven brand mark -->
+                                <Viewbox Width="20" Height="20">
+                                    <Canvas Width="32" Height="32">
+                                        <Path Data="{StaticResource RavenMark}"
+                                              Fill="{StaticResource AccentGradientBrush}" />
+                                        <Ellipse Canvas.Left="19.6" Canvas.Top="9.1" Width="2.8" Height="2.8"
+                                                 Fill="{StaticResource InkBrush}" />
+                                    </Canvas>
+                                </Viewbox>
+                                <TextBlock Margin="9,0,0,0" FontFamily="{StaticResource FontMono}"
+                                           FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center">
+                                    <Run Text="raven" /><Run Text="_ai"
+                                         Foreground="{StaticResource AccentGradientBrush}" />
+                                </TextBlock>
+
+                                <!-- Protection pill: Invisible (ok, pulsing) / Exposed (crit) -->
+                                <Border Margin="10,0,0,0" CornerRadius="8" Padding="10,3"
+                                        Background="{StaticResource OkDimBrush}"
+                                        BorderBrush="{StaticResource OkBorderBrush}" BorderThickness="1"
+                                        VerticalAlignment="Center" ToolTip="{Binding ProtectionStatus}"
+                                        Visibility="{Binding IsFullyHidden, Converter={StaticResource BoolToVisibility}}">
+                                    <StackPanel Orientation="Horizontal">
+                                        <Ellipse Style="{StaticResource PulseDot}" VerticalAlignment="Center" />
+                                        <TextBlock Text="Invisible" Margin="7,0,0,0"
+                                                   FontFamily="{StaticResource FontMono}" FontSize="11"
+                                                   Foreground="{StaticResource OkBrush}" />
+                                    </StackPanel>
+                                </Border>
+                                <Border Margin="10,0,0,0" CornerRadius="8" Padding="10,3"
+                                        Background="{StaticResource CritDimBrush}"
+                                        BorderBrush="{StaticResource CritBorderBrush}" BorderThickness="1"
+                                        VerticalAlignment="Center" ToolTip="{Binding ProtectionStatus}"
+                                        Visibility="{Binding IsFullyHidden, Converter={StaticResource BoolToVisibility}, ConverterParameter=Invert}">
+                                    <StackPanel Orientation="Horizontal">
+                                        <Viewbox Width="13" Height="13">
+                                            <Path Style="{StaticResource IconPath}" Data="{StaticResource IconEye}"
+                                                  Stroke="{StaticResource CritBrush}" />
+                                        </Viewbox>
+                                        <TextBlock Text="Exposed" Margin="7,0,0,0"
+                                                   FontFamily="{StaticResource FontMono}" FontSize="11"
+                                                   Foreground="{StaticResource CritBrush}" />
+                                    </StackPanel>
+                                </Border>
+
+                                <!-- .badge.acc — interactive mode -->
+                                <Border Margin="8,0,0,0" CornerRadius="6" Padding="9,2"
+                                        Background="{StaticResource VioletDimBrush}"
+                                        BorderBrush="{StaticResource VioletBorderBrush}" BorderThickness="1"
+                                        VerticalAlignment="Center"
                                         Visibility="{Binding IsInteractive, Converter={StaticResource BoolToVisibility}}">
-                                    <TextBlock Text="INTERACTIVE" FontSize="10" FontWeight="Bold"
-                                               Foreground="White" VerticalAlignment="Center" />
+                                    <TextBlock Text="● INTERACTIVE" FontFamily="{StaticResource FontMono}"
+                                               FontSize="10" Foreground="{StaticResource VioletBrush}" />
                                 </Border>
                             </StackPanel>
 
-                            <StackPanel Grid.Column="2" Orientation="Horizontal">
-                                <Button Content="Logs" Command="{Binding ToggleLogCommand}"
-                                        Background="Transparent" Padding="8,4" />
-                                <Button Content="Settings" Command="{Binding ToggleSettingsCommand}"
-                                        Background="Transparent" Padding="8,4" />
-                                <Button Content="—" Click="Minimize_Click" Background="Transparent"
-                                        Padding="10,4" ToolTip="Hide (Ctrl+Shift+Space to show)" />
-                                <Button Content="✕" Click="Close_Click" Background="Transparent"
-                                        Padding="10,4" ToolTip="Quit" />
+                            <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                                <Button Style="{StaticResource IconButton}" Command="{Binding ToggleLogCommand}"
+                                        ToolTip="Logs">
+                                    <Viewbox Width="15" Height="15">
+                                        <Path Style="{StaticResource IconPath}" Data="{StaticResource IconLogs}"
+                                              Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" />
+                                    </Viewbox>
+                                </Button>
+                                <Button Style="{StaticResource IconButton}" Command="{Binding ToggleSettingsCommand}"
+                                        ToolTip="Settings">
+                                    <Viewbox Width="15" Height="15">
+                                        <Path Style="{StaticResource IconPath}" Data="{StaticResource IconGear}"
+                                              Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" />
+                                    </Viewbox>
+                                </Button>
+                                <Button Style="{StaticResource IconButton}" Click="Minimize_Click"
+                                        ToolTip="Hide (Ctrl+Shift+Space to show)">
+                                    <Viewbox Width="15" Height="15">
+                                        <Path Style="{StaticResource IconPath}" Data="{StaticResource IconMinimize}"
+                                              Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" />
+                                    </Viewbox>
+                                </Button>
+                                <Button Style="{StaticResource CloseIconButton}" Click="Close_Click" ToolTip="Quit">
+                                    <Viewbox Width="14" Height="14">
+                                        <Path Style="{StaticResource IconPath}" Data="{StaticResource IconClose}"
+                                              Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" />
+                                    </Viewbox>
+                                </Button>
                             </StackPanel>
                         </Grid>
                     </Border>
+                    <Rectangle Grid.Row="0" Height="1" VerticalAlignment="Top" Margin="16,0"
+                               Fill="{StaticResource HairlineGradientBrush}" IsHitTestVisible="False" />
 
-                    <!-- ===== Protection warning banner (loud, only when NOT fully hidden) ===== -->
-                    <Border Grid.Row="1" Background="{StaticResource WarnBrush}" Padding="10,8"
+                    <!-- ===== Protection warnbar (loud, only when NOT fully hidden) ===== -->
+                    <Border Grid.Row="1" Margin="10,8,10,0" Padding="12,10" CornerRadius="9"
+                            Background="{StaticResource WarnbarBrush}"
+                            BorderBrush="{StaticResource CritBorderSoftBrush}" BorderThickness="1"
                             Visibility="{Binding ShowProtectionWarning, Converter={StaticResource BoolToVisibility}}">
-                        <StackPanel>
-                            <TextBlock Text="⚠ Screen-capture protection is NOT fully active"
-                                       Foreground="White" FontWeight="Bold" TextWrapping="Wrap" />
-                            <TextBlock Text="{Binding ProtectionStatus}" Foreground="White"
-                                       TextWrapping="Wrap" FontSize="11" Margin="0,2,0,0" />
-                        </StackPanel>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Viewbox Width="16" Height="16" VerticalAlignment="Top" Margin="0,1,10,0">
+                                <Path Style="{StaticResource IconPath}" Data="{StaticResource IconWarn}"
+                                      Stroke="{StaticResource CritBrush}" />
+                            </Viewbox>
+                            <StackPanel Grid.Column="1">
+                                <TextBlock Text="Screen-capture protection is NOT fully active."
+                                           FontSize="12" FontWeight="SemiBold"
+                                           Foreground="{StaticResource CritBrush}" TextWrapping="Wrap" />
+                                <TextBlock Text="{Binding ProtectionStatus}" FontSize="11" Margin="0,2,0,0"
+                                           Foreground="{StaticResource Text2Brush}" TextWrapping="Wrap" />
+                            </StackPanel>
+                        </Grid>
                     </Border>
 
                     <!-- ===== Chat surface (display-only; all input comes from the staging window) ===== -->
@@ -260,35 +502,91 @@
                             <RowDefinition Height="Auto" />
                         </Grid.RowDefinitions>
 
-                        <!-- Message list -->
-                        <ScrollViewer Grid.Row="0" x:Name="MessagesScroll" Margin="8" VerticalScrollBarVisibility="Auto">
+                        <!-- Message list: assistant left with shield avatar, user right in violet.
+                             Background=Transparent: the fake cursor scrolls whatever ScrollViewer
+                             its hit-test lands in, and chat bubbles are narrow — without a
+                             background the empty areas fall through to the card face and wheel /
+                             scrollbar input goes dead. -->
+                        <ScrollViewer Grid.Row="0" x:Name="MessagesScroll" Margin="8"
+                                      Background="Transparent"
+                                      VerticalScrollBarVisibility="Auto"
+                                      ScrollChanged="MessagesScroll_ScrollChanged">
                             <ItemsControl ItemsSource="{Binding Chat.Messages}">
                                 <ItemsControl.ItemTemplate>
                                     <DataTemplate>
-                                        <Border Margin="4" Padding="10,8" CornerRadius="10" MaxWidth="320"
-                                                HorizontalAlignment="{Binding IsUser, Converter={StaticResource BoolToAlignment}}"
-                                                Background="{Binding IsUser, Converter={StaticResource BoolToBubbleBrush}}">
-                                            <TextBlock Text="{Binding Content}" TextWrapping="Wrap"
-                                                       Foreground="{StaticResource TextBrush}" />
-                                        </Border>
+                                        <Grid Margin="4,5"
+                                              HorizontalAlignment="{Binding IsUser, Converter={StaticResource BoolToAlignment}}">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+
+                                            <!-- Avatar -->
+                                            <Border x:Name="Av" Grid.Column="0" Width="24" Height="24"
+                                                    CornerRadius="7" VerticalAlignment="Top" Margin="0,0,9,0"
+                                                    Background="{StaticResource AvatarGradientBrush}">
+                                                <Grid>
+                                                    <Viewbox x:Name="AvIcon" Width="15" Height="15">
+                                                        <Path Style="{StaticResource IconPath}"
+                                                              Data="{StaticResource IconShield}"
+                                                              Stroke="{StaticResource VioletBrush}" />
+                                                    </Viewbox>
+                                                    <TextBlock x:Name="AvText" Text="Y" Visibility="Collapsed"
+                                                               FontFamily="{StaticResource FontMono}" FontSize="11"
+                                                               Foreground="{StaticResource VioletBrush}"
+                                                               HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                                </Grid>
+                                            </Border>
+
+                                            <!-- Bubble -->
+                                            <Border x:Name="Bub" Grid.Column="1" Padding="12,9" MaxWidth="290"
+                                                    CornerRadius="4,12,12,12"
+                                                    Background="{StaticResource Panel2Brush}"
+                                                    BorderBrush="{StaticResource Line2Brush}" BorderThickness="1">
+                                                <TextBlock Text="{Binding Content}" TextWrapping="Wrap"
+                                                           FontSize="13.5" LineHeight="20"
+                                                           Foreground="{StaticResource TextBrush}" />
+                                            </Border>
+                                        </Grid>
+                                        <DataTemplate.Triggers>
+                                            <DataTrigger Binding="{Binding IsUser}" Value="True">
+                                                <Setter TargetName="Av" Property="Grid.Column" Value="1" />
+                                                <Setter TargetName="Av" Property="Margin" Value="9,0,0,0" />
+                                                <Setter TargetName="Av" Property="Background"
+                                                        Value="{StaticResource VioletDimBrush}" />
+                                                <Setter TargetName="AvIcon" Property="Visibility" Value="Collapsed" />
+                                                <Setter TargetName="AvText" Property="Visibility" Value="Visible" />
+                                                <Setter TargetName="Bub" Property="Grid.Column" Value="0" />
+                                                <Setter TargetName="Bub" Property="CornerRadius" Value="12,4,12,12" />
+                                                <Setter TargetName="Bub" Property="Background"
+                                                        Value="{StaticResource UserBubbleBrush}" />
+                                                <Setter TargetName="Bub" Property="BorderBrush"
+                                                        Value="{StaticResource UserBubbleBorderBrush}" />
+                                            </DataTrigger>
+                                        </DataTemplate.Triggers>
                                     </DataTemplate>
                                 </ItemsControl.ItemTemplate>
                             </ItemsControl>
                         </ScrollViewer>
 
-                        <!-- Error line -->
-                        <Border Grid.Row="1" Background="#3A1F1F" Padding="8,4" Margin="8,0,8,8"
-                                Visibility="{Binding Chat.ErrorMessage, Converter={StaticResource StringToVisibility}}">
-                            <TextBlock Text="{Binding Chat.ErrorMessage}" Foreground="#FF8A80" TextWrapping="Wrap" FontSize="11" />
-                        </Border>
+                        <!-- Error line (.errline) -->
+                        <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="14,0,14,10"
+                                    Visibility="{Binding Chat.ErrorMessage, Converter={StaticResource StringToVisibility}}">
+                            <Viewbox Width="13" Height="13" VerticalAlignment="Top" Margin="0,2,6,0">
+                                <Path Style="{StaticResource IconPath}" Data="{StaticResource IconWarn}"
+                                      Stroke="{StaticResource CritBrush}" />
+                            </Viewbox>
+                            <TextBlock Text="{Binding Chat.ErrorMessage}" FontSize="11.5" MaxWidth="360"
+                                       Foreground="{StaticResource CritBrush}" TextWrapping="Wrap" />
+                        </StackPanel>
                     </Grid>
 
                     <!-- ===== Log panel (overlay) ===== -->
                     <!-- Live view of the unified logger: every error/exception/event, mirrored from the same
                          sink that writes the log file. Newest entries append at the bottom. -->
-                    <Border Grid.Row="2" Background="{StaticResource WindowBg}"
+                    <Border Grid.Row="2" Background="{StaticResource PanelBrush}" CornerRadius="0,0,15,15"
                             Visibility="{Binding IsLogOpen, Converter={StaticResource BoolToVisibility}}">
-                        <Grid DataContext="{Binding Log}" Margin="16,16,16,12">
+                        <Grid DataContext="{Binding Log}" Margin="16,14,16,12">
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="Auto" />  <!-- header + actions -->
                                 <RowDefinition Height="*" />     <!-- entry list -->
@@ -296,7 +594,7 @@
                             </Grid.RowDefinitions>
 
                             <!-- Header row -->
-                            <Grid Grid.Row="0" Margin="0,0,0,8">
+                            <Grid Grid.Row="0" Margin="0,0,0,10">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*" />
                                     <ColumnDefinition Width="Auto" />
@@ -304,26 +602,43 @@
                                     <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
 
-                                <TextBlock Grid.Column="0" Text="Logs" FontSize="16" FontWeight="Bold"
+                                <TextBlock Grid.Column="0" Text="logs" FontFamily="{StaticResource FontMono}"
+                                           FontSize="15" FontWeight="SemiBold"
                                            Foreground="{StaticResource TextBrush}" VerticalAlignment="Center" />
-                                <Button Grid.Column="1" Content="Copy" Command="{Binding CopyAllCommand}"
-                                        Padding="10,4" Margin="6,0,0,0" Background="#555" />
-                                <Button Grid.Column="2" Content="Folder" Command="{Binding OpenLogFolderCommand}"
-                                        Padding="10,4" Margin="6,0,0,0" Background="#555"
-                                        ToolTip="Open the log file's folder" />
-                                <Button Grid.Column="3" Content="Clear" Command="{Binding ClearCommand}"
-                                        Padding="10,4" Margin="6,0,0,0" Background="#555"
-                                        ToolTip="Clear the on-screen list (the file is not touched)" />
+                                <Button Grid.Column="1" Style="{StaticResource IconButton}"
+                                        Command="{Binding CopyAllCommand}" ToolTip="Copy all entries">
+                                    <Viewbox Width="14" Height="14">
+                                        <Path Style="{StaticResource IconPath}" Data="{StaticResource IconCopy}"
+                                              Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" />
+                                    </Viewbox>
+                                </Button>
+                                <Button Grid.Column="2" Style="{StaticResource IconButton}"
+                                        Command="{Binding OpenLogFolderCommand}" ToolTip="Open the log file's folder">
+                                    <Viewbox Width="14" Height="14">
+                                        <Path Style="{StaticResource IconPath}" Data="{StaticResource IconFolder}"
+                                              Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" />
+                                    </Viewbox>
+                                </Button>
+                                <Button Grid.Column="3" Style="{StaticResource IconButton}"
+                                        Command="{Binding ClearCommand}"
+                                        ToolTip="Clear the on-screen list (the file is not touched)">
+                                    <Viewbox Width="14" Height="14">
+                                        <Path Style="{StaticResource IconPath}" Data="{StaticResource IconTrash}"
+                                              Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" />
+                                    </Viewbox>
+                                </Button>
                             </Grid>
 
-                            <!-- Entry list. Auto-scrolls to newest via ScrollViewer in code-behind if needed;
-                                 here we simply rely on the list growing downward. -->
-                            <Border Grid.Row="1" Background="{StaticResource PanelBg}" CornerRadius="6" Padding="4">
-                                <ScrollViewer x:Name="LogScroll" VerticalScrollBarVisibility="Auto">
+                            <!-- Entry list: mono rows with a color-coded level column -->
+                            <Border Grid.Row="1" Background="{StaticResource Ink2Brush}"
+                                    BorderBrush="{StaticResource Line2Brush}" BorderThickness="1"
+                                    CornerRadius="10" Padding="6">
+                                <ScrollViewer x:Name="LogScroll" Background="Transparent"
+                                              VerticalScrollBarVisibility="Auto">
                                     <ItemsControl ItemsSource="{Binding Entries}">
                                         <ItemsControl.ItemTemplate>
                                             <DataTemplate>
-                                                <Grid Margin="4,3">
+                                                <Grid Margin="6,3">
                                                     <Grid.ColumnDefinitions>
                                                         <ColumnDefinition Width="Auto" />
                                                         <ColumnDefinition Width="Auto" />
@@ -331,24 +646,28 @@
                                                     </Grid.ColumnDefinitions>
 
                                                     <TextBlock Grid.Column="0" Text="{Binding TimeText}"
-                                                               Foreground="{StaticResource SubtleTextBrush}"
-                                                               FontFamily="Consolas" FontSize="11"
-                                                               VerticalAlignment="Top" Margin="0,0,8,0" />
+                                                               Foreground="{StaticResource Text3Brush}"
+                                                               FontFamily="{StaticResource FontMono}" FontSize="11"
+                                                               VerticalAlignment="Top" Margin="0,0,9,0" />
                                                     <TextBlock Grid.Column="1" Text="{Binding LevelText}"
                                                                Foreground="{Binding Level, Converter={StaticResource LogLevelToBrush}}"
-                                                               FontFamily="Consolas" FontSize="11" FontWeight="Bold"
-                                                               VerticalAlignment="Top" Margin="0,0,8,0" />
+                                                               FontFamily="{StaticResource FontMono}" FontSize="11"
+                                                               FontWeight="Bold" VerticalAlignment="Top"
+                                                               Margin="0,0,9,0" />
                                                     <StackPanel Grid.Column="2">
-                                                        <TextBlock TextWrapping="Wrap" FontSize="12"
-                                                                   Foreground="{StaticResource TextBrush}">
-                                                            <Run Text="{Binding Category, Mode=OneWay}" FontWeight="Bold"
-                                                                 Foreground="{StaticResource SubtleTextBrush}" />
+                                                        <TextBlock TextWrapping="Wrap"
+                                                                   FontFamily="{StaticResource FontMono}"
+                                                                   FontSize="11.5"
+                                                                   Foreground="{StaticResource Text2Brush}">
+                                                            <Run Text="{Binding Category, Mode=OneWay}"
+                                                                 FontWeight="SemiBold"
+                                                                 Foreground="{StaticResource TextBrush}" />
                                                             <Run Text="  " />
                                                             <Run Text="{Binding Message, Mode=OneWay}" />
                                                         </TextBlock>
                                                         <TextBlock Text="{Binding Detail}" TextWrapping="Wrap"
-                                                                   FontFamily="Consolas" FontSize="11"
-                                                                   Foreground="{StaticResource SubtleTextBrush}"
+                                                                   FontFamily="{StaticResource FontMono}" FontSize="11"
+                                                                   Foreground="{StaticResource Text3Brush}"
                                                                    Margin="0,2,0,0"
                                                                    Visibility="{Binding HasDetail, Converter={StaticResource BoolToVisibility}}" />
                                                     </StackPanel>
@@ -359,190 +678,592 @@
                                 </ScrollViewer>
                             </Border>
 
-                            <TextBlock Grid.Row="2" Text="{Binding LogFilePath}" FontSize="11"
-                                       Foreground="{StaticResource SubtleTextBrush}" TextTrimming="CharacterEllipsis"
-                                       Margin="0,8,0,0" ToolTip="{Binding LogFilePath}" />
+                            <TextBlock Grid.Row="2" Text="{Binding LogFilePath}"
+                                       FontFamily="{StaticResource FontMono}" FontSize="10.5"
+                                       Foreground="{StaticResource Text3Brush}" TextTrimming="CharacterEllipsis"
+                                       Margin="0,9,0,0" ToolTip="{Binding LogFilePath}" />
                         </Grid>
                     </Border>
 
-                    <!-- ===== Settings pane (overlay) ===== -->
-                    <Border Grid.Row="2" Background="{StaticResource WindowBg}"
+                    <!-- ===== Settings pane (overlay): Provider / Voice / Search / Appearance ===== -->
+                    <Border Grid.Row="2" Background="{StaticResource PanelBrush}" CornerRadius="0,0,15,15"
                             Visibility="{Binding IsSettingsOpen, Converter={StaticResource BoolToVisibility}}">
-                        <ScrollViewer VerticalScrollBarVisibility="Auto">
-                            <StackPanel Margin="16" DataContext="{Binding Settings}">
-                                <TextBlock Text="Settings" FontSize="18" FontWeight="Bold"
-                                           Foreground="{StaticResource TextBrush}" Margin="0,0,0,12" />
+                        <Grid Margin="16,14,16,12" DataContext="{Binding Settings}">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />  <!-- header -->
+                                <RowDefinition Height="*" />     <!-- tabs -->
+                                <RowDefinition Height="Auto" />  <!-- save + status -->
+                            </Grid.RowDefinitions>
 
-                                <TextBlock Text="API Key" Foreground="{StaticResource SubtleTextBrush}" />
-                                <PasswordBox x:Name="APIKeyBox" Margin="0,4,0,2" Padding="8,6"
-                                             Background="{StaticResource PanelBg}" Foreground="{StaticResource TextBrush}" />
-                                <TextBlock Foreground="{StaticResource SubtleTextBrush}" FontSize="11" Margin="0,0,0,8"
-                                           Text="Stored encrypted (DPAPI). Leave blank to keep the current key." />
-                                <TextBlock Text="✓ A key is currently stored." Foreground="#7ED07E" FontSize="11" Margin="0,0,0,8"
-                                           Visibility="{Binding HasStoredKey, Converter={StaticResource BoolToVisibility}}" />
+                            <TextBlock Grid.Row="0" Text="settings" FontFamily="{StaticResource FontMono}"
+                                       FontSize="15" FontWeight="SemiBold" Margin="0,0,0,10"
+                                       Foreground="{StaticResource TextBrush}" />
 
-                                <TextBlock Text="Base URL" Foreground="{StaticResource SubtleTextBrush}" />
-                                <TextBox Text="{Binding BaseURL}" Margin="0,4,0,8" />
+                            <TabControl Grid.Row="1">
+                                <!-- ===== Provider ===== -->
+                                <TabItem Header="Provider">
+                                    <ScrollViewer Background="Transparent"
+                                                  VerticalScrollBarVisibility="Auto">
+                                        <StackPanel Margin="0,0,4,0">
+                                            <TextBlock Style="{StaticResource LabelCaption}" Text="BASE URL" />
+                                            <TextBox Text="{Binding BaseURL}" Margin="0,0,0,12" />
 
-                                <!-- Model dropdowns are editable: they list the ids fetched from the provider's
-                                     /models endpoint (the ⟳ button, or auto-loaded when Settings first opens),
-                                     but a custom id can still be typed for providers that don't list one. -->
-                                <TextBlock Text="Chat Model" Foreground="{StaticResource SubtleTextBrush}" />
-                                <Grid Margin="0,4,0,8">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <ComboBox Grid.Column="0" IsEditable="True" IsTextSearchEnabled="True"
-                                              ItemsSource="{Binding AvailableModels}"
-                                              Text="{Binding Model, UpdateSourceTrigger=PropertyChanged}" />
-                                    <Button Grid.Column="1" Content="⟳" Command="{Binding RefreshModelsCommand}"
-                                            Margin="6,0,0,0" Padding="10,4"
-                                            ToolTip="Fetch available models from your provider" />
-                                </Grid>
+                                            <TextBlock Style="{StaticResource LabelCaption}" Text="API KEY" />
+                                            <PasswordBox x:Name="APIKeyBox" Margin="0,0,0,6" />
+                                            <TextBlock Style="{StaticResource HintText}" Margin="0,0,0,6"
+                                                       Text="Stored encrypted (DPAPI). Leave blank to keep the current key." />
+                                            <Border HorizontalAlignment="Left" CornerRadius="8" Padding="10,4"
+                                                    Margin="0,0,0,12" Background="{StaticResource OkDimBrush}"
+                                                    BorderBrush="{StaticResource OkChipBorderBrush}" BorderThickness="1"
+                                                    Visibility="{Binding HasStoredKey, Converter={StaticResource BoolToVisibility}}">
+                                                <StackPanel Orientation="Horizontal">
+                                                    <Viewbox Width="12" Height="12">
+                                                        <Path Style="{StaticResource IconPath}"
+                                                              Data="{StaticResource IconLock}"
+                                                              Stroke="{StaticResource OkBrush}" />
+                                                    </Viewbox>
+                                                    <TextBlock Text="Key stored · encrypted with DPAPI"
+                                                               Margin="7,0,0,0" FontFamily="{StaticResource FontMono}"
+                                                               FontSize="10.5" Foreground="{StaticResource OkBrush}" />
+                                                </StackPanel>
+                                            </Border>
 
-                                <TextBlock Text="System Prompt" Foreground="{StaticResource SubtleTextBrush}" />
-                                <TextBox Text="{Binding SystemPrompt}" Margin="0,4,0,8" AcceptsReturn="True" MinHeight="48"
-                                         TextWrapping="Wrap" />
+                                            <TextBlock Style="{StaticResource LabelCaption}" Text="CHAT MODEL" />
+                                            <!-- Editable: lists ids fetched from the provider's /models endpoint
+                                                 (the refresh button, or auto-loaded when Settings first opens),
+                                                 but a custom id can still be typed. -->
+                                            <Grid Margin="0,0,0,12">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <ComboBox Grid.Column="0" IsEditable="True" IsTextSearchEnabled="True"
+                                                          ItemsSource="{Binding AvailableModels}"
+                                                          Text="{Binding Model, UpdateSourceTrigger=PropertyChanged}" />
+                                                <Button Grid.Column="1" Style="{StaticResource IconButton}"
+                                                        Command="{Binding RefreshModelsCommand}" Margin="6,0,0,0"
+                                                        VerticalAlignment="Center"
+                                                        ToolTip="Fetch available models from your provider">
+                                                    <Viewbox Width="14" Height="14">
+                                                        <Path Style="{StaticResource IconPath}"
+                                                              Data="{StaticResource IconRefresh}"
+                                                              Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" />
+                                                    </Viewbox>
+                                                </Button>
+                                            </Grid>
 
-                                <TextBlock Text="Speech-to-Text Model" Foreground="{StaticResource SubtleTextBrush}" />
-                                <ComboBox IsEditable="True" IsTextSearchEnabled="True" Margin="0,4,0,8"
-                                          ItemsSource="{Binding AvailableModels}"
-                                          Text="{Binding STTModel, UpdateSourceTrigger=PropertyChanged}" />
+                                            <TextBlock Style="{StaticResource LabelCaption}" Text="SYSTEM PROMPT" />
+                                            <TextBox Text="{Binding SystemPrompt}" AcceptsReturn="True" MinHeight="56"
+                                                     TextWrapping="Wrap" Margin="0,0,0,12"
+                                                     VerticalContentAlignment="Top" />
 
-                                <TextBlock Text="Text-to-Speech Model" Foreground="{StaticResource SubtleTextBrush}" />
-                                <ComboBox IsEditable="True" IsTextSearchEnabled="True" Margin="0,4,0,8"
-                                          ItemsSource="{Binding AvailableModels}"
-                                          Text="{Binding TTSModel, UpdateSourceTrigger=PropertyChanged}" />
+                                            <Button Content="Clear key" Style="{StaticResource DangerButton}"
+                                                    Command="{Binding ClearKeyCommand}" HorizontalAlignment="Left" />
+                                        </StackPanel>
+                                    </ScrollViewer>
+                                </TabItem>
 
-                                <TextBlock Text="TTS Voice" Foreground="{StaticResource SubtleTextBrush}" />
-                                <TextBox Text="{Binding TTSVoice}" Margin="0,4,0,8" />
+                                <!-- ===== Voice ===== -->
+                                <TabItem Header="Voice">
+                                    <ScrollViewer Background="Transparent"
+                                                  VerticalScrollBarVisibility="Auto">
+                                        <StackPanel Margin="0,0,4,0">
+                                            <TextBlock Style="{StaticResource LabelCaption}" Text="SPEECH-TO-TEXT MODEL" />
+                                            <ComboBox IsEditable="True" IsTextSearchEnabled="True" Margin="0,0,0,12"
+                                                      ItemsSource="{Binding AvailableModels}"
+                                                      Text="{Binding STTModel, UpdateSourceTrigger=PropertyChanged}" />
 
-                                <CheckBox Content="Use Windows offline TTS (no network)" IsChecked="{Binding UseOfflineTTS}"
-                                          Foreground="{StaticResource TextBrush}" Margin="0,4,0,12" />
+                                            <TextBlock Style="{StaticResource LabelCaption}" Text="TEXT-TO-SPEECH MODEL" />
+                                            <ComboBox IsEditable="True" IsTextSearchEnabled="True" Margin="0,0,0,12"
+                                                      ItemsSource="{Binding AvailableModels}"
+                                                      Text="{Binding TTSModel, UpdateSourceTrigger=PropertyChanged}" />
 
-                                <!-- ===== Azure Speech (speech-to-text) ===== -->
-                                <Border BorderBrush="{StaticResource PanelBg}" BorderThickness="0,1,0,0"
-                                        Margin="0,4,0,12" Padding="0,12,0,0">
-                                    <StackPanel>
-                                        <TextBlock Text="Azure Speech (Speech-to-Text)" FontWeight="Bold"
-                                                   Foreground="{StaticResource TextBrush}" Margin="0,0,0,8" />
+                                            <TextBlock Style="{StaticResource LabelCaption}" Text="TTS VOICE" />
+                                            <TextBox Text="{Binding TTSVoice}" Margin="0,0,0,12" />
 
-                                        <TextBlock Text="Azure Speech Key" Foreground="{StaticResource SubtleTextBrush}" />
-                                        <PasswordBox x:Name="AzureSpeechKeyBox" Margin="0,4,0,2" Padding="8,6"
-                                                     Background="{StaticResource PanelBg}" Foreground="{StaticResource TextBrush}" />
-                                        <TextBlock Foreground="{StaticResource SubtleTextBrush}" FontSize="11" Margin="0,0,0,8"
-                                                   Text="Stored encrypted (DPAPI). Leave blank to keep the current key." />
-                                        <TextBlock Text="✓ An Azure key is currently stored." Foreground="#7ED07E" FontSize="11" Margin="0,0,0,8"
-                                                   Visibility="{Binding HasStoredAzureSpeechKey, Converter={StaticResource BoolToVisibility}}" />
+                                            <CheckBox Content="Use Windows offline TTS (no network)"
+                                                      IsChecked="{Binding UseOfflineTTS}" Margin="0,0,0,16" />
 
-                                        <TextBlock Text="Endpoint / Region" Foreground="{StaticResource SubtleTextBrush}" />
-                                        <TextBox Text="{Binding AzureSpeechEndpoint}" Margin="0,4,0,2" />
-                                        <TextBlock Foreground="{StaticResource SubtleTextBrush}" FontSize="11" Margin="0,0,0,8"
-                                                   TextWrapping="Wrap"
-                                                   Text="Full endpoint (e.g. https://eastus.api.cognitive.microsoft.com) or just a region (e.g. eastus)." />
+                                            <!-- Azure Speech channel (cyan = transcription spine) -->
+                                            <StackPanel Orientation="Horizontal" Margin="0,0,0,9">
+                                                <Ellipse Width="7" Height="7" Fill="{StaticResource CyanBrush}"
+                                                         VerticalAlignment="Center" />
+                                                <TextBlock Text="Azure Speech" Margin="8,0,0,0"
+                                                           FontFamily="{StaticResource FontMono}" FontSize="11"
+                                                           FontWeight="SemiBold"
+                                                           Foreground="{StaticResource TextBrush}" />
+                                                <TextBlock Text="— live transcription" Margin="8,0,0,0" FontSize="11"
+                                                           Foreground="{StaticResource Text3Brush}" />
+                                            </StackPanel>
 
-                                        <TextBlock Text="Recognition Language" Foreground="{StaticResource SubtleTextBrush}" />
-                                        <TextBox Text="{Binding AzureSpeechRecognitionLanguage}" Margin="0,4,0,8" />
+                                            <TextBlock Style="{StaticResource LabelCaption}" Text="AZURE SPEECH KEY" />
+                                            <PasswordBox x:Name="AzureSpeechKeyBox" Margin="0,0,0,6" />
+                                            <Border HorizontalAlignment="Left" CornerRadius="8" Padding="10,4"
+                                                    Margin="0,0,0,12" Background="{StaticResource OkDimBrush}"
+                                                    BorderBrush="{StaticResource OkChipBorderBrush}" BorderThickness="1"
+                                                    Visibility="{Binding HasStoredAzureSpeechKey, Converter={StaticResource BoolToVisibility}}">
+                                                <StackPanel Orientation="Horizontal">
+                                                    <Viewbox Width="12" Height="12">
+                                                        <Path Style="{StaticResource IconPath}"
+                                                              Data="{StaticResource IconLock}"
+                                                              Stroke="{StaticResource OkBrush}" />
+                                                    </Viewbox>
+                                                    <TextBlock Text="Key stored · encrypted with DPAPI"
+                                                               Margin="7,0,0,0" FontFamily="{StaticResource FontMono}"
+                                                               FontSize="10.5" Foreground="{StaticResource OkBrush}" />
+                                                </StackPanel>
+                                            </Border>
 
-                                        <Button Content="Clear Azure Key" Command="{Binding ClearAzureKeyCommand}"
-                                                Background="#555" HorizontalAlignment="Left" Padding="10,4" />
-                                    </StackPanel>
-                                </Border>
+                                            <TextBlock Style="{StaticResource LabelCaption}" Text="ENDPOINT / REGION" />
+                                            <TextBox Text="{Binding AzureSpeechEndpoint}" Margin="0,0,0,4" />
+                                            <TextBlock Style="{StaticResource HintText}" Margin="0,0,0,12"
+                                                       Text="Full endpoint (e.g. https://eastus.api.cognitive.microsoft.com) or just a region (e.g. eastus)." />
 
-                                <!-- ===== Web Search (assistant tool) ===== -->
-                                <Border BorderBrush="{StaticResource PanelBg}" BorderThickness="0,1,0,0"
-                                        Margin="0,4,0,12" Padding="0,12,0,0">
-                                    <StackPanel>
-                                        <TextBlock Text="Web Search (Tavily)" FontWeight="Bold"
-                                                   Foreground="{StaticResource TextBrush}" Margin="0,0,0,8" />
+                                            <TextBlock Style="{StaticResource LabelCaption}" Text="RECOGNITION LANGUAGE" />
+                                            <TextBox Text="{Binding AzureSpeechRecognitionLanguage}" Margin="0,0,0,12" />
 
-                                        <TextBlock Text="Tavily API Key" Foreground="{StaticResource SubtleTextBrush}" />
-                                        <PasswordBox x:Name="WebSearchKeyBox" Margin="0,4,0,2" Padding="8,6"
-                                                     Background="{StaticResource PanelBg}" Foreground="{StaticResource TextBrush}" />
-                                        <TextBlock Foreground="{StaticResource SubtleTextBrush}" FontSize="11" Margin="0,0,0,8"
-                                                   TextWrapping="Wrap"
-                                                   Text="Enables the assistant's web_search tool. Stored encrypted (DPAPI). Leave blank to keep the current key." />
-                                        <TextBlock Text="✓ A web-search key is currently stored." Foreground="#7ED07E" FontSize="11" Margin="0,0,0,8"
-                                                   Visibility="{Binding HasStoredWebSearchKey, Converter={StaticResource BoolToVisibility}}" />
+                                            <Button Content="Clear Azure key" Style="{StaticResource DangerButton}"
+                                                    Command="{Binding ClearAzureKeyCommand}"
+                                                    HorizontalAlignment="Left" />
+                                        </StackPanel>
+                                    </ScrollViewer>
+                                </TabItem>
 
-                                        <TextBlock Text="Endpoint" Foreground="{StaticResource SubtleTextBrush}" />
-                                        <TextBox Text="{Binding WebSearchEndpoint}" Margin="0,4,0,2" />
-                                        <TextBlock Foreground="{StaticResource SubtleTextBrush}" FontSize="11" Margin="0,0,0,8"
-                                                   TextWrapping="Wrap"
-                                                   Text="Tavily-compatible search endpoint (default https://api.tavily.com/search)." />
+                                <!-- ===== Search ===== -->
+                                <TabItem Header="Search">
+                                    <ScrollViewer Background="Transparent"
+                                                  VerticalScrollBarVisibility="Auto">
+                                        <StackPanel Margin="0,0,4,0">
+                                            <StackPanel Orientation="Horizontal" Margin="0,0,0,9">
+                                                <Ellipse Width="7" Height="7" Fill="{StaticResource VioletBrush}"
+                                                         VerticalAlignment="Center" />
+                                                <TextBlock Text="Web search" Margin="8,0,0,0"
+                                                           FontFamily="{StaticResource FontMono}" FontSize="11"
+                                                           FontWeight="SemiBold"
+                                                           Foreground="{StaticResource TextBrush}" />
+                                                <TextBlock Text="— Tavily key for the agent's search tool"
+                                                           Margin="8,0,0,0" FontSize="11"
+                                                           Foreground="{StaticResource Text3Brush}" />
+                                            </StackPanel>
 
-                                        <Button Content="Clear Web-Search Key" Command="{Binding ClearWebSearchKeyCommand}"
-                                                Background="#555" HorizontalAlignment="Left" Padding="10,4" />
-                                    </StackPanel>
-                                </Border>
+                                            <TextBlock Style="{StaticResource LabelCaption}" Text="TAVILY API KEY" />
+                                            <PasswordBox x:Name="WebSearchKeyBox" Margin="0,0,0,6" />
+                                            <TextBlock Style="{StaticResource HintText}" Margin="0,0,0,6"
+                                                       Text="Enables the assistant's web_search tool. Stored encrypted (DPAPI). Leave blank to keep the current key." />
+                                            <Border HorizontalAlignment="Left" CornerRadius="8" Padding="10,4"
+                                                    Margin="0,0,0,12" Background="{StaticResource OkDimBrush}"
+                                                    BorderBrush="{StaticResource OkChipBorderBrush}" BorderThickness="1"
+                                                    Visibility="{Binding HasStoredWebSearchKey, Converter={StaticResource BoolToVisibility}}">
+                                                <StackPanel Orientation="Horizontal">
+                                                    <Viewbox Width="12" Height="12">
+                                                        <Path Style="{StaticResource IconPath}"
+                                                              Data="{StaticResource IconLock}"
+                                                              Stroke="{StaticResource OkBrush}" />
+                                                    </Viewbox>
+                                                    <TextBlock Text="Key stored · encrypted with DPAPI"
+                                                               Margin="7,0,0,0" FontFamily="{StaticResource FontMono}"
+                                                               FontSize="10.5" Foreground="{StaticResource OkBrush}" />
+                                                </StackPanel>
+                                            </Border>
 
-                                <!-- ===== Window transparency ===== -->
-                                <Grid Margin="0,0,0,12">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <TextBlock Grid.Column="0" Text="Window transparency"
-                                               Foreground="{StaticResource SubtleTextBrush}" VerticalAlignment="Center" />
-                                    <TextBlock Grid.Column="1" Foreground="{StaticResource TextBrush}" VerticalAlignment="Center"
-                                               Text="{Binding WindowOpacity, StringFormat={}{0}%}" />
-                                </Grid>
-                                <Slider Minimum="30" Maximum="100" TickFrequency="10" IsSnapToTickEnabled="False"
-                                        Value="{Binding WindowOpacity, Mode=TwoWay}" Margin="0,0,0,4" />
-                                <TextBlock Foreground="{StaticResource SubtleTextBrush}" FontSize="11" Margin="0,0,0,12"
-                                           TextWrapping="Wrap"
-                                           Text="Fades the whole window on your screen, applied live. The window stays hidden from screen shares/recordings — watch the status dot in the title bar; if it ever turns red, the warning banner explains that protection is off." />
+                                            <TextBlock Style="{StaticResource LabelCaption}" Text="ENDPOINT" />
+                                            <TextBox Text="{Binding WebSearchEndpoint}" Margin="0,0,0,4" />
+                                            <TextBlock Style="{StaticResource HintText}" Margin="0,0,0,12"
+                                                       Text="Tavily-compatible search endpoint (default https://api.tavily.com/search)." />
 
-                                <StackPanel Orientation="Horizontal">
-                                    <Button Content="Save" Click="SaveSettings_Click" />
-                                    <Button Content="Clear Key" Command="{Binding ClearKeyCommand}" Margin="8,0,0,0"
-                                            Background="#555" />
-                                </StackPanel>
+                                            <Button Content="Clear web-search key" Style="{StaticResource DangerButton}"
+                                                    Command="{Binding ClearWebSearchKeyCommand}"
+                                                    HorizontalAlignment="Left" />
+                                        </StackPanel>
+                                    </ScrollViewer>
+                                </TabItem>
 
-                                <TextBlock Text="{Binding StatusMessage}" Foreground="{StaticResource SubtleTextBrush}"
-                                           Margin="0,10,0,0" FontSize="11" />
+                                <!-- ===== Appearance ===== -->
+                                <TabItem Header="Appearance">
+                                    <ScrollViewer Background="Transparent"
+                                                  VerticalScrollBarVisibility="Auto">
+                                        <StackPanel Margin="0,0,4,0">
+                                            <Grid Margin="0,0,0,8">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock Style="{StaticResource LabelCaption}" Margin="0"
+                                                           Text="WINDOW TRANSPARENCY" VerticalAlignment="Center" />
+                                                <TextBlock Grid.Column="1" FontFamily="{StaticResource FontMono}"
+                                                           FontSize="12" Foreground="{StaticResource VioletBrush}"
+                                                           VerticalAlignment="Center"
+                                                           Text="{Binding WindowOpacity, StringFormat={}{0}%}" />
+                                            </Grid>
+                                            <Slider Minimum="30" Maximum="100" TickFrequency="10"
+                                                    IsSnapToTickEnabled="False"
+                                                    Value="{Binding WindowOpacity, Mode=TwoWay}" Margin="0,0,0,6" />
+                                            <TextBlock Style="{StaticResource HintText}" Margin="0,0,0,16"
+                                                       Text="Fades the whole window on your screen, applied live. The window stays hidden from screen shares/recordings — watch the protection pill in the title bar; if it ever turns red, the warning banner explains that protection is off." />
 
-                                <!-- ===== Build info (identify the exact running build) ===== -->
-                                <Border BorderBrush="{StaticResource PanelBg}" BorderThickness="0,1,0,0"
-                                        Margin="0,12,0,0" Padding="0,10,0,0">
-                                    <StackPanel>
-                                        <TextBlock Text="Build" FontWeight="Bold"
-                                                   Foreground="{StaticResource TextBrush}" Margin="0,0,0,4" />
-                                        <TextBlock Text="{x:Static app:BuildInfo.Summary}" TextWrapping="Wrap"
-                                                   Foreground="{StaticResource SubtleTextBrush}" FontFamily="Consolas"
-                                                   FontSize="11" />
-                                    </StackPanel>
-                                </Border>
+                                            <!-- Build info (identify the exact running build) -->
+                                            <Border BorderBrush="{StaticResource Line2Brush}"
+                                                    BorderThickness="0,1,0,0" Padding="0,12,0,0">
+                                                <StackPanel>
+                                                    <TextBlock Style="{StaticResource LabelCaption}" Text="BUILD" />
+                                                    <TextBlock Text="{x:Static app:BuildInfo.Summary}"
+                                                               TextWrapping="Wrap"
+                                                               FontFamily="{StaticResource FontMono}" FontSize="10.5"
+                                                               Foreground="{StaticResource Text3Brush}" />
+                                                </StackPanel>
+                                            </Border>
+                                        </StackPanel>
+                                    </ScrollViewer>
+                                </TabItem>
+                            </TabControl>
+
+                            <!-- Save + status -->
+                            <StackPanel Grid.Row="2" Margin="0,12,0,0">
+                                <Button Content="Save settings" Style="{StaticResource PrimaryButton}"
+                                        Click="SaveSettings_Click" HorizontalAlignment="Stretch" Height="38" />
+                                <TextBlock Text="{Binding StatusMessage}" FontFamily="{StaticResource FontMono}"
+                                           FontSize="10.5" Foreground="{StaticResource Text3Brush}"
+                                           Margin="0,8,0,0" TextWrapping="Wrap"
+                                           Visibility="{Binding StatusMessage, Converter={StaticResource StringToVisibility}}" />
                             </StackPanel>
-                        </ScrollViewer>
+                        </Grid>
                     </Border>
+                </Grid>
+            </Border>
+            <!-- ============================================================================= -->
+            <!-- ===== First-run provider gate (centered; shown until a key is stored) ======= -->
+            <!-- ============================================================================= -->
+            <!-- Blocks the overlay until the provider is connected: Base URL + API key are
+                 required; Validate proves them by listing /models, which also unlocks the
+                 commit button. Azure Speech / Tavily keys are optional channels. -->
+            <Border x:Name="GateCard" Width="452"
+                    Background="{StaticResource CardFaceBrush}" CornerRadius="16"
+                    BorderBrush="{StaticResource LineBrush}" BorderThickness="1"
+                    Visibility="{Binding IsGateOpen, Converter={StaticResource BoolToVisibility}}">
+                <Border.Effect>
+                    <DropShadowEffect Color="Black" BlurRadius="40" ShadowDepth="8" Direction="270" Opacity="0.65" />
+                </Border.Effect>
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />  <!-- title bar -->
+                        <RowDefinition Height="Auto" />  <!-- body -->
+                    </Grid.RowDefinitions>
+
+                    <!-- Title bar (drag to move via the fake cursor while interactive) -->
+                    <Border x:Name="GateTitleBar" Grid.Row="0" Background="{StaticResource TitlebarBrush}"
+                            CornerRadius="15,15,0,0" BorderBrush="{StaticResource Line2Brush}"
+                            BorderThickness="0,0,0,1" Height="38">
+                        <Grid Margin="13,0,8,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                <Viewbox Width="20" Height="20">
+                                    <Canvas Width="32" Height="32">
+                                        <Path Data="{StaticResource RavenMark}"
+                                              Fill="{StaticResource AccentGradientBrush}" />
+                                        <Ellipse Canvas.Left="19.6" Canvas.Top="9.1" Width="2.8" Height="2.8"
+                                                 Fill="{StaticResource InkBrush}" />
+                                    </Canvas>
+                                </Viewbox>
+                                <TextBlock Margin="9,0,0,0" FontFamily="{StaticResource FontMono}"
+                                           FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center">
+                                    <Run Text="raven" /><Run Text="_ai"
+                                         Foreground="{StaticResource AccentGradientBrush}" />
+                                </TextBlock>
+                            </StackPanel>
+                            <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                                <Button Style="{StaticResource IconButton}" Click="Minimize_Click"
+                                        ToolTip="Hide (Ctrl+Shift+Space to show)">
+                                    <Viewbox Width="15" Height="15">
+                                        <Path Style="{StaticResource IconPath}" Data="{StaticResource IconMinimize}"
+                                              Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" />
+                                    </Viewbox>
+                                </Button>
+                                <Button Style="{StaticResource CloseIconButton}" Click="Close_Click" ToolTip="Quit">
+                                    <Viewbox Width="14" Height="14">
+                                        <Path Style="{StaticResource IconPath}" Data="{StaticResource IconClose}"
+                                              Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" />
+                                    </Viewbox>
+                                </Button>
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+                    <Rectangle Grid.Row="0" Height="1" VerticalAlignment="Top" Margin="16,0"
+                               Fill="{StaticResource HairlineGradientBrush}" IsHitTestVisible="False" />
+
+                    <!-- Body -->
+                    <StackPanel Grid.Row="1" Margin="24,20,24,18" DataContext="{Binding Settings}">
+                        <TextBlock Text="FIRST RUN · CONNECT PROVIDER" FontFamily="{StaticResource FontMono}"
+                                   FontSize="11" Foreground="{StaticResource CyanBrush}" Margin="0,0,0,9" />
+                        <TextBlock Text="Point raven_ai at your model" FontFamily="{StaticResource FontMono}"
+                                   FontSize="21" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}"
+                                   TextWrapping="Wrap" Margin="0,0,0,8" />
+                        <TextBlock FontSize="13" Foreground="{StaticResource Text2Brush}" TextWrapping="Wrap"
+                                   LineHeight="19" Margin="0,0,0,18"
+                                   Text="Add a key to unlock the overlay — it drives chat, transcription and voice. Models and everything else are configured later in Settings." />
+
+                        <!-- Base URL -->
+                        <Grid Margin="0,0,0,6">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Style="{StaticResource LabelCaption}" Text="BASE URL" Margin="0"
+                                       VerticalAlignment="Center" />
+                            <Border Grid.Column="1" Margin="8,0,0,0" CornerRadius="6" Padding="7,1"
+                                    Background="{StaticResource VioletDimBrush}"
+                                    BorderBrush="{StaticResource VioletBorderBrush}" BorderThickness="1"
+                                    VerticalAlignment="Center">
+                                <TextBlock Text="REQUIRED" FontFamily="{StaticResource FontMono}" FontSize="9"
+                                           Foreground="{StaticResource VioletBrush}" />
+                            </Border>
+                            <TextBlock Grid.Column="2" Text="OpenAI-compatible /v1" FontSize="11"
+                                       Foreground="{StaticResource Text3Brush}" HorizontalAlignment="Right"
+                                       VerticalAlignment="Center" />
+                        </Grid>
+                        <TextBox Text="{Binding BaseURL, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,15" />
+
+                        <!-- API key + validate -->
+                        <Grid Margin="0,0,0,6">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Style="{StaticResource LabelCaption}" Text="API KEY" Margin="0"
+                                       VerticalAlignment="Center" />
+                            <Border Grid.Column="1" Margin="8,0,0,0" CornerRadius="6" Padding="7,1"
+                                    Background="{StaticResource VioletDimBrush}"
+                                    BorderBrush="{StaticResource VioletBorderBrush}" BorderThickness="1"
+                                    VerticalAlignment="Center">
+                                <TextBlock Text="REQUIRED" FontFamily="{StaticResource FontMono}" FontSize="9"
+                                           Foreground="{StaticResource VioletBrush}" />
+                            </Border>
+                            <TextBlock Grid.Column="2" Text="encrypted, never leaves this PC" FontSize="11"
+                                       Foreground="{StaticResource Text3Brush}" HorizontalAlignment="Right"
+                                       VerticalAlignment="Center" />
+                        </Grid>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <!-- Secret field with a peek toggle; the plain box swaps in while peeking -->
+                            <Grid Grid.Column="0">
+                                <PasswordBox x:Name="GateKeyBox" Padding="10,8,38,8" />
+                                <TextBox x:Name="GateKeyPlainBox" Padding="10,8,38,8" Visibility="Collapsed" />
+                                <ToggleButton x:Name="GateKeyPeek" Style="{StaticResource IconButton}"
+                                              Width="26" Height="26" HorizontalAlignment="Right"
+                                              Margin="0,0,6,0" ToolTip="Show / hide key"
+                                              Checked="GatePeek_Checked" Unchecked="GatePeek_Unchecked">
+                                    <Grid>
+                                        <Viewbox Width="15" Height="15"
+                                                 Visibility="{Binding IsChecked, ElementName=GateKeyPeek, Converter={StaticResource BoolToVisibility}, ConverterParameter=Invert}">
+                                            <Path Style="{StaticResource IconPath}" Data="{StaticResource IconEye}"
+                                                  Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ToggleButton}}" />
+                                        </Viewbox>
+                                        <Viewbox Width="15" Height="15"
+                                                 Visibility="{Binding IsChecked, ElementName=GateKeyPeek, Converter={StaticResource BoolToVisibility}}">
+                                            <Path Style="{StaticResource IconPath}" Data="{StaticResource IconEyeOff}"
+                                                  Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ToggleButton}}" />
+                                        </Viewbox>
+                                    </Grid>
+                                </ToggleButton>
+                            </Grid>
+                            <Button Grid.Column="1" Margin="8,0,0,0" Click="GateValidate_Click"
+                                    VerticalAlignment="Stretch">
+                                <Button.Style>
+                                    <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+                                        <Setter Property="Content" Value="Validate" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsValidatingGate}" Value="True">
+                                                <Setter Property="Content" Value="Checking…" />
+                                                <Setter Property="IsEnabled" Value="False" />
+                                            </DataTrigger>
+                                            <DataTrigger Binding="{Binding GateKeyValidated}" Value="True">
+                                                <Setter Property="Content" Value="Re-check" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Button.Style>
+                            </Button>
+                        </Grid>
+                        <!-- Status line: progress (muted), failure (crit) or verified (emerald) -->
+                        <TextBlock Text="{Binding GateStatus}" FontSize="11.5" TextWrapping="Wrap"
+                                   MinHeight="18" Margin="1,7,0,10"
+                                   Visibility="{Binding GateStatus, Converter={StaticResource StringToVisibility}}">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="Foreground" Value="{StaticResource Text3Brush}" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding GateStatusIsError}" Value="True">
+                                            <Setter Property="Foreground" Value="{StaticResource CritBrush}" />
+                                        </DataTrigger>
+                                        <DataTrigger Binding="{Binding GateKeyValidated}" Value="True">
+                                            <Setter Property="Foreground" Value="{StaticResource OkBrush}" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
+
+                        <!-- Optional channels: Azure Speech · Web search -->
+                        <ToggleButton x:Name="GateOptionalToggle" Cursor="Hand"
+                                      FocusVisualStyle="{x:Null}" HorizontalAlignment="Stretch"
+                                      HorizontalContentAlignment="Stretch">
+                            <ToggleButton.Template>
+                                <ControlTemplate TargetType="ToggleButton">
+                                    <ContentPresenter />
+                                </ControlTemplate>
+                            </ToggleButton.Template>
+                            <Border Background="{StaticResource Panel2Brush}"
+                                    BorderBrush="{StaticResource Line2Brush}" BorderThickness="1"
+                                    CornerRadius="11" Padding="13,10">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <Viewbox Width="11" Height="11" VerticalAlignment="Center"
+                                             RenderTransformOrigin="0.5,0.5">
+                                        <Viewbox.Style>
+                                            <Style TargetType="Viewbox">
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding IsChecked, ElementName=GateOptionalToggle}"
+                                                                 Value="True">
+                                                        <Setter Property="RenderTransform">
+                                                            <Setter.Value>
+                                                                <RotateTransform Angle="90" />
+                                                            </Setter.Value>
+                                                        </Setter>
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </Viewbox.Style>
+                                        <Path Style="{StaticResource IconPath}"
+                                              Data="{StaticResource IconChevronRight}"
+                                              Stroke="{StaticResource Text3Brush}" StrokeThickness="2.4" />
+                                    </Viewbox>
+                                    <TextBlock Grid.Column="1" Text="Add optional channels" Margin="10,0,0,0"
+                                               FontFamily="{StaticResource FontMono}" FontSize="11.5"
+                                               Foreground="{StaticResource Text2Brush}" VerticalAlignment="Center" />
+                                    <TextBlock Grid.Column="2" Text="Azure Speech · Web search" FontSize="10"
+                                               Foreground="{StaticResource Text3Brush}" VerticalAlignment="Center" />
+                                </Grid>
+                            </Border>
+                        </ToggleButton>
+                        <Border BorderBrush="{StaticResource Line2Brush}" BorderThickness="1,0,1,1"
+                                CornerRadius="0,0,11,11" Padding="13,12,13,13" Margin="0,-4,0,0"
+                                Background="{StaticResource Ink2Brush}"
+                                Visibility="{Binding IsChecked, ElementName=GateOptionalToggle, Converter={StaticResource BoolToVisibility}}">
+                            <StackPanel>
+                                <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                                    <Ellipse Width="7" Height="7" Fill="{StaticResource CyanBrush}"
+                                             VerticalAlignment="Center" />
+                                    <TextBlock Text="Azure Speech" Margin="8,0,0,0"
+                                               FontFamily="{StaticResource FontMono}" FontSize="11"
+                                               FontWeight="SemiBold" Foreground="{StaticResource TextBrush}" />
+                                    <TextBlock Text="— higher-accuracy transcription" Margin="8,0,0,0"
+                                               FontSize="11" Foreground="{StaticResource Text3Brush}" />
+                                </StackPanel>
+                                <Grid Margin="0,0,0,14">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="1.4*" />
+                                        <ColumnDefinition Width="10" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Grid.Column="0">
+                                        <TextBlock Style="{StaticResource MicroLabel}" Text="RESOURCE KEY" />
+                                        <PasswordBox x:Name="GateAzureKeyBox" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="2">
+                                        <TextBlock Style="{StaticResource MicroLabel}" Text="REGION / ENDPOINT" />
+                                        <TextBox Text="{Binding AzureSpeechEndpoint, UpdateSourceTrigger=PropertyChanged}" />
+                                    </StackPanel>
+                                </Grid>
+                                <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                                    <Ellipse Width="7" Height="7" Fill="{StaticResource VioletBrush}"
+                                             VerticalAlignment="Center" />
+                                    <TextBlock Text="Web search" Margin="8,0,0,0"
+                                               FontFamily="{StaticResource FontMono}" FontSize="11"
+                                               FontWeight="SemiBold" Foreground="{StaticResource TextBrush}" />
+                                    <TextBlock Text="— Tavily key for the agent's search tool" Margin="8,0,0,0"
+                                               FontSize="11" Foreground="{StaticResource Text3Brush}" />
+                                </StackPanel>
+                                <TextBlock Style="{StaticResource MicroLabel}" Text="TAVILY API KEY" />
+                                <PasswordBox x:Name="GateTavilyKeyBox" />
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Assurance -->
+                        <Border Margin="0,16,0,16" Padding="12,11" CornerRadius="11"
+                                Background="{StaticResource AssureBrush}"
+                                BorderBrush="{StaticResource OkBorderSoftBrush}" BorderThickness="1">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Viewbox Width="15" Height="15" VerticalAlignment="Top" Margin="0,1,9,0">
+                                    <Path Style="{StaticResource IconPath}" Data="{StaticResource IconShieldCheck}"
+                                          Stroke="{StaticResource OkBrush}" />
+                                </Viewbox>
+                                <TextBlock Grid.Column="1" FontSize="11.5" LineHeight="17" TextWrapping="Wrap"
+                                           Foreground="{StaticResource Text2Brush}">
+                                    <Run Text="Keys are sealed to this machine." FontWeight="SemiBold"
+                                         Foreground="{StaticResource TextBrush}" />
+                                    <Run Text="Each credential is encrypted with Windows DPAPI (current-user scope) and only ever sent to the endpoint you point it at." />
+                                </TextBlock>
+                            </Grid>
+                        </Border>
+
+                        <!-- Commit -->
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <Button Style="{StaticResource PrimaryButton}" Height="42"
+                                    HorizontalAlignment="Stretch" Click="GateUnlock_Click"
+                                    IsEnabled="{Binding GateKeyValidated}">
+                                <StackPanel Orientation="Horizontal">
+                                    <Viewbox Width="15" Height="15" Margin="0,0,8,0">
+                                        <Path Style="{StaticResource IconPath}" Data="{StaticResource IconLock}"
+                                              Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                                              StrokeThickness="2.2" />
+                                    </Viewbox>
+                                    <TextBlock Text="Unlock raven_ai" FontSize="13" FontWeight="SemiBold" />
+                                </StackPanel>
+                            </Button>
+                            <Button Grid.Column="1" Content="Get a key" Style="{StaticResource LinkButton}"
+                                    Margin="10,0,0,0" Click="GateGetKey_Click"
+                                    ToolTip="Open your provider's API-keys page" />
+                        </Grid>
+
+                        <TextBlock Text="Change any of this later in Settings → Provider" Margin="0,14,0,0"
+                                   FontFamily="{StaticResource FontMono}" FontSize="10.5"
+                                   Foreground="{StaticResource Text3Brush}" HorizontalAlignment="Center" />
+                    </StackPanel>
                 </Grid>
             </Border>
         </Canvas>
 
         <!-- ===== Interactive-mode hint (top-center) ===== -->
         <Border VerticalAlignment="Top" HorizontalAlignment="Center" Margin="0,14,0,0"
-                Background="#CC26262B" CornerRadius="16" Padding="14,7" IsHitTestVisible="False"
+                Background="#E6141826" BorderBrush="{StaticResource LineBrush}" BorderThickness="1"
+                CornerRadius="9" Padding="14,7" IsHitTestVisible="False"
                 Visibility="{Binding IsInteractive, Converter={StaticResource BoolToVisibility}}">
-            <TextBlock Foreground="{StaticResource TextBrush}" FontSize="12"
+            <TextBlock Foreground="{StaticResource Text2Brush}" FontFamily="{StaticResource FontMono}" FontSize="11.5"
                        Text="Interactive mode — real cursor frozen · Esc or Ctrl+Shift+I to exit" />
         </Border>
 
-        <!-- ===== Fake cursor layer (painted; drawn on top of everything) ===== -->
-        <Canvas x:Name="CursorLayer" IsHitTestVisible="False"
-                Visibility="{Binding IsInteractive, Converter={StaticResource BoolToVisibility}}">
-            <!-- A vector arrow pointer (crisp at any scale), tip at (0,0). FakeCursorScale sizes it to
-                 match the real cursor; FakeCursorTransform positions the tip on the fake-cursor point. -->
-            <Path Fill="White" Stroke="#202024" StrokeThickness="1"
-                  Data="M 0,0 L 0,17 L 4.5,13 L 7.5,19.5 L 10,18.3 L 7,12 L 12.5,12 Z">
-                <Path.RenderTransform>
-                    <TransformGroup>
-                        <ScaleTransform x:Name="FakeCursorScale" ScaleX="1" ScaleY="1" />
-                        <TranslateTransform x:Name="FakeCursorTransform" X="0" Y="0" />
-                    </TransformGroup>
-                </Path.RenderTransform>
-            </Path>
-        </Canvas>
+        <!-- The fake cursor itself is NOT painted here: dropdown/tooltip popups are separate
+             topmost HWNDs stacked above this overlay, so an in-overlay cursor would vanish
+             beneath them. It lives in its own window instead (FakeCursorWindow). -->
     </Grid>
 </Window>

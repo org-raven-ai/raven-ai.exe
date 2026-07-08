@@ -31,6 +31,31 @@ internal static class NativeWindowStyle
     [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW", SetLastError = true)]
     private static extern IntPtr SetWindowLongPtr(IntPtr hWnd, int nIndex, IntPtr dwNewLong);
 
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetWindowPos(
+        IntPtr hWnd, IntPtr hWndInsertAfter, int x, int y, int cx, int cy, uint uFlags);
+
+    private static readonly IntPtr HWND_TOPMOST = new(-1);
+    private const uint SWP_NOSIZE = 0x0001;
+    private const uint SWP_NOMOVE = 0x0002;
+    private const uint SWP_NOACTIVATE = 0x0010;
+
+    /// <summary>
+    /// Re-asserts <paramref name="hWnd"/> at the top of the topmost band, above topmost popups
+    /// that opened after it (WPF dropdowns and tooltips of a topmost window are themselves
+    /// topmost). Position and size are untouched.
+    /// </summary>
+    public static void BumpTopmost(IntPtr hWnd)
+        => SetWindowPos(hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+
+    /// <summary>
+    /// Moves <paramref name="hWnd"/> to the given physical-pixel position while re-asserting it
+    /// at the top of the topmost band. Size is untouched.
+    /// </summary>
+    public static void MoveTopmost(IntPtr hWnd, int x, int y)
+        => SetWindowPos(hWnd, HWND_TOPMOST, x, y, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE);
+
     /// <summary>Adds WS_EX_TOOLWINDOW and strips WS_EX_APPWINDOW on <paramref name="hWnd"/>.</summary>
     public static void MakeToolWindow(IntPtr hWnd)
     {

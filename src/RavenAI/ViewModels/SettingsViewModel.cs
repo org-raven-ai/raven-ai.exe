@@ -183,6 +183,86 @@ public sealed partial class SettingsViewModel : ObservableObject
             RefreshModelsCommand.Execute(null);
     }
 
+    // ---- First-run provider gate ---------------------------------------------------------
+    // The gate blocks the overlay until a provider key is stored. Validate persists the
+    // URL + key, then proves them by listing /models; Unlock (in the shell) closes the gate.
+
+    /// <summary>True once the gate's key has been verified against the provider.</summary>
+    [ObservableProperty] private bool _gateKeyValidated;
+
+    /// <summary>True when <see cref="GateStatus"/> describes a failure (styles the line critical).</summary>
+    [ObservableProperty] private bool _gateStatusIsError;
+
+    /// <summary>Progress / verdict line under the gate's key field.</summary>
+    [ObservableProperty] private string _gateStatus = string.Empty;
+
+    /// <summary>True while the gate's /models probe is in flight.</summary>
+    [ObservableProperty] private bool _isValidatingGate;
+
+    [RelayCommand(AllowConcurrentExecutions = false)]
+    private async Task ValidateGateAsync()
+    {
+        string url = (BaseURL ?? string.Empty).Trim();
+        string key = APIKeyInput.Trim();
+
+        GateKeyValidated = false;
+        GateStatusIsError = false;
+
+        if (!url.StartsWith("http://", StringComparison.OrdinalIgnoreCase) &&
+            !url.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+        {
+            GateStatus = "Enter a valid https:// base URL first.";
+            GateStatusIsError = true;
+            return;
+        }
+        if (key.Length == 0 && !HasStoredKey)
+        {
+            GateStatus = "Paste your API key first.";
+            GateStatusIsError = true;
+            return;
+        }
+        if (key.Length > 0 && key.Length < 8)
+        {
+            GateStatus = "That key looks too short — paste the full secret.";
+            GateStatusIsError = true;
+            return;
+        }
+
+        // Persist the URL + key up front: the model catalog reads the stored settings.
+        _settings.BaseURL = url;
+        if (key.Length > 0)
+        {
+            _store.SetAPIKey(_settings, key);
+            HasStoredKey = true;
+        }
+        _store.Save(_settings);
+        APIKeyInput = string.Empty; // never keep plaintext around
+
+        IsValidatingGate = true;
+        GateStatus = $"Reaching {url.Replace("https://", string.Empty).Replace("http://", string.Empty)} …";
+        try
+        {
+            IReadOnlyList<string> models = await _modelCatalog.ListModelsAsync();
+            AvailableModels.Clear();
+            foreach (string m in models)
+                AvailableModels.Add(m);
+            GateKeyValidated = true;
+            GateStatus = models.Count > 0
+                ? $"Verified · stored encrypted · {models.Count} models found"
+                : "Verified · stored encrypted";
+        }
+        catch (Exception ex)
+        {
+            Log.Warning("Gate key validation failed", ex, "Settings");
+            GateStatusIsError = true;
+            GateStatus = $"Could not reach the provider: {ex.Message}";
+        }
+        finally
+        {
+            IsValidatingGate = false;
+        }
+    }
+
     [RelayCommand]
     private void ClearKey()
     {

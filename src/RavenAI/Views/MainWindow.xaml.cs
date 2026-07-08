@@ -21,6 +21,9 @@ using TextBoxBase = System.Windows.Controls.Primitives.TextBoxBase;
 using Control = System.Windows.Controls.Control;
 using ComboBox = System.Windows.Controls.ComboBox;
 using TextBox = System.Windows.Controls.TextBox;
+using ScrollBar = System.Windows.Controls.Primitives.ScrollBar;
+using Orientation = System.Windows.Controls.Orientation;
+using ToolTip = System.Windows.Controls.ToolTip;
 
 namespace RavenAI.Views;
 
@@ -46,6 +49,8 @@ public partial class MainWindow : Window
 
     // Fake-cursor position, in RootCanvas (device-independent) coordinates.
     private Point _fakeCursor;
+    // The topmost window that paints the fake cursor (created on first interactive entry).
+    private FakeCursorWindow? _cursorWindow;
     // The card whose title bar the fake cursor is currently dragging (null when not dragging).
     private Border? _draggingCard;
     // The button pressed by the fake cursor, invoked on release if still under the cursor.
@@ -68,6 +73,26 @@ public partial class MainWindow : Window
     private TextBox? _selectingTextBox;
     private int _selectionAnchor;
 
+    // The slider being dragged by the fake cursor (null when not dragging). Thumb's own drag
+    // needs real mouse capture, so the press/move handlers set the value from the cursor instead.
+    private Slider? _draggingSlider;
+
+    // The scrollbar being dragged by the fake cursor, plus the scroll viewer it belongs to.
+    // Same story as the slider: Thumb dragging needs real mouse capture, so a press anywhere on
+    // the bar jumps the owner to that point and holding drags it.
+    private ScrollBar? _draggingScrollBar;
+    private ScrollViewer? _draggingScrollViewer;
+
+    // Drag work accumulates here between frames and is applied once per composed frame
+    // (OnInteractiveFrame): raw input arrives far faster (~1000 Hz) than frames are composed,
+    // and card moves / slider updates per event backlog the dispatcher — the visible lag-and-
+    // drift. The card's drop shadow is also suspended while dragging: effects inflate the
+    // re-rendered region of the layered overlay on every frame.
+    private double _pendingDragDx;
+    private double _pendingDragDy;
+    private bool _pointerDragUpdateRequested;
+    private System.Windows.Media.Effects.Effect? _draggedCardEffect;
+
     // Virtual-key codes for the hotkeys.
     private const uint VK_SPACE = 0x20;
     private const uint VK_V = 0x56;
@@ -88,6 +113,7 @@ public partial class MainWindow : Window
 
         DataContext = _vm;
         InitializeComponent();
+        WirePopupHandlers();
 
         // Keep the log panel pinned to the newest entry as errors/events stream in.
         _vm.Log.Entries.CollectionChanged += (_, e) =>
@@ -109,14 +135,14 @@ public partial class MainWindow : Window
         Width = SystemParameters.VirtualScreenWidth;
         Height = SystemParameters.VirtualScreenHeight;
 
-        Loaded += (_, _) => PlaceCardsTopRight();
+        Loaded += (_, _) => PlaceCardsCentered();
     }
 
     /// <summary>
-    /// Places the two floating cards near the top-right of the primary working area (once): the chat
-    /// card on the right, the transcription-staging card immediately to its left.
+    /// Places the two floating cards centered in the primary working area (once), side by side:
+    /// the transcription-staging card on the left, the agent chat card immediately to its right.
     /// </summary>
-    private void PlaceCardsTopRight()
+    private void PlaceCardsCentered()
     {
         if (_panelPlaced)
             return;
@@ -125,13 +151,18 @@ public partial class MainWindow : Window
         const double gap = 12;
         var wa = SystemParameters.WorkArea;
         // WorkArea is in screen coordinates; the canvas origin is the window's top-left.
-        double top = wa.Top + 24 - Top;
-        double chatLeft = wa.Right - ChatCard.Width - 24 - Left;
+        double pairWidth = StagingCard.Width + gap + ChatCard.Width;
+        double stagingLeft = wa.Left + (wa.Width - pairWidth) / 2 - Left;
+        double top = wa.Top + Math.Max(0, (wa.Height - Math.Max(StagingCard.Height, ChatCard.Height)) / 2) - Top;
 
-        Canvas.SetLeft(ChatCard, chatLeft);
-        Canvas.SetTop(ChatCard, top);
-        Canvas.SetLeft(StagingCard, chatLeft - StagingCard.Width - gap);
+        Canvas.SetLeft(StagingCard, stagingLeft);
         Canvas.SetTop(StagingCard, top);
+        Canvas.SetLeft(ChatCard, stagingLeft + StagingCard.Width + gap);
+        Canvas.SetTop(ChatCard, top);
+
+        // The first-run gate floats centered in the primary work area (upper third).
+        Canvas.SetLeft(GateCard, (wa.Left + wa.Right - GateCard.Width) / 2 - Left);
+        Canvas.SetTop(GateCard, wa.Top + Math.Max(24, wa.Height * 0.16) - Top);
     }
 
     /// <summary>
@@ -217,6 +248,74 @@ public partial class MainWindow : Window
     }
 
     // ---- Screen-capture protection --------------------------------------------------------
+
+    // Combo dropdowns and tooltips open in their own top-level popup HWNDs. Two consequences,
+    // both handled per-popup as each one opens:
+    //  - They stack above the fake-cursor window, so the cursor must be re-asserted topmost
+    //    whenever a dropdown opens (all builds).
+    //  - They do NOT inherit the overlay's display affinity — without exclusion they would be
+    //    the one part of the UI visible in screen shares (Release builds; Debug intentionally
+    //    runs with capture protection disabled).
+
+#if !DEBUG
+    private static bool _toolTipCaptureHandlerRegistered;
+#endif
+
+    private void WirePopupHandlers()
+    {
+        // The logical tree (unlike the visual tree) also reaches combos inside unselected tabs.
+        foreach (ComboBox combo in FindLogicalDescendants<ComboBox>(this))
+        {
+            ComboBox c = combo;
+            c.DropDownOpened += (_, _) =>
+                // The popup's HWND is created as part of opening; defer until it exists.
+                Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () =>
+                {
+                    _cursorWindow?.BumpAbovePopups();
+#if !DEBUG
+                    ExcludePopupVisualFromCapture(
+                        (c.Template.FindName("PART_Popup", c) as Popup)?.Child);
+#endif
+                });
+        }
+
+#if !DEBUG
+        if (!_toolTipCaptureHandlerRegistered)
+        {
+            _toolTipCaptureHandlerRegistered = true;
+            // Fully qualified: inside a Window subclass, `ToolTip` binds to the inherited
+            // FrameworkElement.ToolTip property rather than the control type.
+            EventManager.RegisterClassHandler(typeof(ToolTip),
+                System.Windows.Controls.ToolTip.OpenedEvent,
+                new RoutedEventHandler((sender, _) => ExcludePopupVisualFromCapture(sender as Visual)));
+        }
+#endif
+    }
+
+    private static void ExcludePopupVisualFromCapture(Visual? popupContent)
+    {
+        if (popupContent is null || PresentationSource.FromVisual(popupContent) is not HwndSource src)
+            return;
+        if (!NativeCaptureProtection.Apply(
+                src.Handle, NativeCaptureProtection.WDA_EXCLUDEFROMCAPTURE, out int error))
+        {
+            Services.Logging.Log.Warning(
+                $"Popup capture exclusion failed (win32={error})", null, "Protection");
+        }
+    }
+
+    private static IEnumerable<T> FindLogicalDescendants<T>(DependencyObject node) where T : DependencyObject
+    {
+        foreach (object child in LogicalTreeHelper.GetChildren(node))
+        {
+            if (child is not DependencyObject dependencyChild)
+                continue;
+            if (dependencyChild is T match)
+                yield return match;
+            foreach (T nested in FindLogicalDescendants<T>(dependencyChild))
+                yield return nested;
+        }
+    }
 
     private void ApplyCaptureProtection(IntPtr hwnd)
     {
@@ -308,6 +407,11 @@ public partial class MainWindow : Window
         if (!IsVisible)
             Show();
 
+        // The cursor floats in its own topmost window so it stays above dropdown popups.
+        _cursorWindow ??= new FakeCursorWindow();
+        _cursorWindow.Show();
+        _cursorWindow.BumpAbovePopups();
+
         // Size the painted arrow to match the real cursor at the current DPI + pointer-size setting.
         UpdateCursorScale();
 
@@ -319,7 +423,13 @@ public partial class MainWindow : Window
         _draggingCard = null;
         _pressedButton = null;
         _selectingTextBox = null;
+        _pendingDragDx = _pendingDragDy = 0;
+        _pointerDragUpdateRequested = false;
         _vm.IsInteractive = true;
+
+        // Drags are applied per composed frame, not per raw-input event.
+        System.Windows.Media.CompositionTarget.Rendering -= OnInteractiveFrame;
+        System.Windows.Media.CompositionTarget.Rendering += OnInteractiveFrame;
 
         // Capture input + freeze the real cursor BEFORE we take the foreground, so the
         // controller records the app the user came from (to restore focus on exit).
@@ -335,10 +445,23 @@ public partial class MainWindow : Window
             return;
 
         _interactive.Exit();   // releases the cursor clip and restores the previous foreground app
+        System.Windows.Media.CompositionTarget.Rendering -= OnInteractiveFrame;
+        _cursorWindow?.Hide();
+        RestoreDraggedCardEffect();
         _draggingCard = null;
         _pressedButton = null;
         _selectingTextBox = null;
+        _pendingDragDx = _pendingDragDy = 0;
+        _pointerDragUpdateRequested = false;
         _vm.IsInteractive = false;
+    }
+
+    // Puts the drop shadow back on the card whose drag suspended it.
+    private void RestoreDraggedCardEffect()
+    {
+        if (_draggingCard is not null && _draggedCardEffect is not null)
+            _draggingCard.Effect = _draggedCardEffect;
+        _draggedCardEffect = null;
     }
 
     /// <summary>
@@ -358,13 +481,40 @@ public partial class MainWindow : Window
         _fakeCursor = ClampToCanvas(new Point(_fakeCursor.X + dx, _fakeCursor.Y + dy));
         MoveFakeCursor();
 
+        // Only record what the drag wants; OnInteractiveFrame applies it once per frame.
         if (_draggingCard is not null)
         {
-            MoveCardBy(_draggingCard, dx, dy);
+            _pendingDragDx += dx;
+            _pendingDragDy += dy;
             return;
         }
 
-        if (_selectingTextBox is not null)
+        if (_draggingSlider is not null || _draggingScrollBar is not null || _selectingTextBox is not null)
+            _pointerDragUpdateRequested = true;
+    }
+
+    /// <summary>
+    /// Applies the drag work accumulated since the last composed frame. Subscribed to
+    /// <see cref="System.Windows.Media.CompositionTarget.Rendering"/> only while interactive.
+    /// </summary>
+    private void OnInteractiveFrame(object? sender, EventArgs e)
+    {
+        if (_draggingCard is not null && (_pendingDragDx != 0 || _pendingDragDy != 0))
+        {
+            MoveCardBy(_draggingCard, _pendingDragDx, _pendingDragDy);
+            _pendingDragDx = 0;
+            _pendingDragDy = 0;
+        }
+
+        if (!_pointerDragUpdateRequested)
+            return;
+        _pointerDragUpdateRequested = false;
+
+        if (_draggingSlider is not null)
+            SetSliderValueFromCursor(_draggingSlider);
+        else if (_draggingScrollBar is not null && _draggingScrollViewer is not null)
+            SetScrollFromCursor(_draggingScrollBar, _draggingScrollViewer);
+        else if (_selectingTextBox is not null)
             ExtendTextSelection(_selectingTextBox);
     }
 
@@ -374,13 +524,68 @@ public partial class MainWindow : Window
             return;
 
         DependencyObject? hit = HitTest(_fakeCursor);
+
+        // An open combo dropdown floats in its own popup window above the canvas, invisible to
+        // the canvas hit-test — give it first claim on the press.
+        if (FindOpenComboBox(RootCanvas) is ComboBox openCombo)
+        {
+            DependencyObject? popupHit = HitTestComboPopup(openCombo);
+            if (popupHit is not null)
+            {
+                if (FindAncestor<ComboBoxItem>(popupHit) is ComboBoxItem item)
+                {
+                    object dataItem = openCombo.ItemContainerGenerator.ItemFromContainer(item);
+                    openCombo.SelectedItem =
+                        dataItem == DependencyProperty.UnsetValue ? item : dataItem;
+                    openCombo.IsDropDownOpen = false;
+                }
+                return; // presses inside the popup never fall through to the canvas
+            }
+
+            // Pressing anywhere else closes the dropdown. On the combo itself (its face or its
+            // chevron) closing IS the whole click; elsewhere the press continues normally.
+            openCombo.IsDropDownOpen = false;
+            if (hit is not null && IsWithin(hit, openCombo))
+                return;
+        }
+
         if (hit is null)
             return;
+
+        // A slider absorbs the press before the button check: its track halves are RepeatButtons,
+        // which would otherwise win and only nudge the value by LargeChange. Real Thumb dragging
+        // needs mouse capture the fake cursor can't provide, so re-implement the modern slider
+        // gesture instead — press jumps the value to the cursor, holding drags it.
+        if (FindAncestor<Slider>(hit) is Slider slider)
+        {
+            _draggingSlider = slider;
+            SetSliderValueFromCursor(slider);
+            return;
+        }
+
+        // Same gesture for scrollbars: press jumps the owning scroll viewer to that point on the
+        // track, holding drags. (Absorbed before the button check — the track is RepeatButtons.)
+        if (FindAncestor<ScrollBar>(hit) is ScrollBar bar
+            && FindAncestor<ScrollViewer>(bar) is ScrollViewer scrollOwner)
+        {
+            _draggingScrollBar = bar;
+            _draggingScrollViewer = scrollOwner;
+            SetScrollFromCursor(bar, scrollOwner);
+            return;
+        }
 
         // A button under the cursor wins over a title-bar drag (the title bar hosts buttons too).
         _pressedButton = FindAncestor<ButtonBase>(hit);
         if (_pressedButton is not null)
             return;
+
+        // A settings-tab header: TabItem is not a ButtonBase, so the button dispatch above never
+        // fires for it — select it explicitly (real tab controls also switch on mouse-down).
+        if (FindAncestor<TabItem>(hit) is TabItem tab)
+        {
+            tab.IsSelected = true;
+            return;
+        }
 
         // Give focus to a clicked input control so the keyboard can type into it, and — for a text
         // box — drop the caret at the clicked character and arm drag-to-select.
@@ -400,6 +605,11 @@ public partial class MainWindow : Window
                     _selectionAnchor = index;
                 }
             }
+
+            // A closed non-editable combo opens on a click anywhere within it. (Editable combos
+            // route text-area clicks to their inner text box and open via the chevron button.)
+            if (input is ComboBox { IsEditable: false, IsDropDownOpen: false } combo)
+                combo.IsDropDownOpen = true;
             return;
         }
 
@@ -408,6 +618,17 @@ public partial class MainWindow : Window
             _draggingCard = ChatCard;
         else if (IsWithin(hit, StagingTitleBar))
             _draggingCard = StagingCard;
+        else if (IsWithin(hit, GateTitleBar))
+            _draggingCard = GateCard;
+
+        if (_draggingCard is not null)
+        {
+            _pendingDragDx = _pendingDragDy = 0;
+            // Suspend the drop shadow for the drag: the effect inflates the region of the
+            // layered overlay that must re-render on every frame of movement.
+            _draggedCardEffect = _draggingCard.Effect;
+            _draggingCard.Effect = null;
+        }
     }
 
     private void OnInteractiveButtonReleased(OverlayMouseButton button)
@@ -416,9 +637,17 @@ public partial class MainWindow : Window
             return;
 
         _selectingTextBox = null;
+        _draggingSlider = null;
+        _draggingScrollBar = null;
+        _draggingScrollViewer = null;
 
         if (_draggingCard is not null)
         {
+            // Apply whatever movement is still pending, then bring the shadow back.
+            if (_pendingDragDx != 0 || _pendingDragDy != 0)
+                MoveCardBy(_draggingCard, _pendingDragDx, _pendingDragDy);
+            _pendingDragDx = _pendingDragDy = 0;
+            RestoreDraggedCardEffect();
             _draggingCard = null;
             return;
         }
@@ -434,36 +663,91 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// Routes a wheel notch to whatever is under the fake cursor by raising a real
-    /// <see cref="UIElement.MouseWheelEvent"/>, so nested scroll viewers, list boxes and combo
-    /// popups all scroll exactly as they would under the real pointer. If nothing in the route
-    /// handled it, fall back to nudging the nearest <see cref="ScrollViewer"/> directly.
+    /// Routes a wheel notch to the nearest ancestor <see cref="ScrollViewer"/> that can actually
+    /// move in the wheel's direction, skipping ones that can't. Raising a routed wheel event
+    /// instead would let a non-scrollable inner viewer swallow the notch — every text box hosts a
+    /// ScrollViewer (PART_ContentHost) that marks the event handled even with nothing to scroll,
+    /// which froze the settings pane whenever the cursor sat over an input field. Skipping
+    /// exhausted viewers also hands the notch outward once an inner list hits its end.
+    /// A wheel notch over an open combo dropdown scrolls the popup's list instead.
     /// </summary>
     private void OnInteractiveWheel(int delta)
     {
-        DependencyObject? hit = HitTest(_fakeCursor);
-        if (hit is null || FindAncestor<UIElement>(hit) is not UIElement target)
-            return;
-
-        var args = new MouseWheelEventArgs(Mouse.PrimaryDevice, Environment.TickCount, delta)
+        if (FindOpenComboBox(RootCanvas) is ComboBox openCombo
+            && HitTestComboPopup(openCombo) is DependencyObject popupHit)
         {
-            RoutedEvent = UIElement.MouseWheelEvent,
-            Source = target,
-        };
-        target.RaiseEvent(args);
+            ScrollNearestScrollable(popupHit, delta);
+            return;
+        }
 
-        // One wheel notch is 120 units; scroll ~48 DIU per notch, wheel-up scrolls up.
-        if (!args.Handled && FindAncestor<ScrollViewer>(hit) is ScrollViewer scroller)
-            scroller.ScrollToVerticalOffset(scroller.VerticalOffset - delta / 120.0 * 48.0);
+        DependencyObject? hit = HitTest(_fakeCursor);
+        if (hit is not null)
+            ScrollNearestScrollable(hit, delta);
+    }
+
+    private static void ScrollNearestScrollable(DependencyObject from, int delta)
+    {
+        for (DependencyObject? cur = from; cur is not null; cur = VisualTreeHelper.GetParent(cur))
+        {
+            if (cur is ScrollViewer scroller && CanScroll(scroller, delta))
+            {
+                // One wheel notch is 120 units; scroll ~48 DIU per notch, wheel-up scrolls up.
+                scroller.ScrollToVerticalOffset(scroller.VerticalOffset - delta / 120.0 * 48.0);
+                return;
+            }
+        }
+
+        static bool CanScroll(ScrollViewer scroller, int delta) => delta > 0
+            ? scroller.VerticalOffset > 0
+            : scroller.VerticalOffset < scroller.ScrollableHeight;
+    }
+
+    // ---- ComboBox dropdown support ----------------------------------------------------------
+
+    /// <summary>
+    /// Finds the ComboBox whose dropdown is currently open, if any (WPF opens at most one).
+    /// The dropdown lives in a separate popup window, so canvas hit-testing never reaches it;
+    /// the press/wheel handlers ask this first and hit-test the popup explicitly.
+    /// </summary>
+    private static ComboBox? FindOpenComboBox(DependencyObject node)
+    {
+        if (node is ComboBox { IsDropDownOpen: true } combo)
+            return combo;
+
+        int count = VisualTreeHelper.GetChildrenCount(node);
+        for (int i = 0; i < count; i++)
+        {
+            if (FindOpenComboBox(VisualTreeHelper.GetChild(node, i)) is ComboBox found)
+                return found;
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Hit-tests an open combo's dropdown popup at the fake-cursor position. The popup has its
+    /// own HWND and visual tree, so the point is routed through screen coordinates.
+    /// </summary>
+    private DependencyObject? HitTestComboPopup(ComboBox combo)
+    {
+        if (combo.Template.FindName("PART_Popup", combo) is not Popup { Child: UIElement child })
+            return null;
+        if (PresentationSource.FromVisual(child) is null)
+            return null;
+
+        Point screen = RootCanvas.PointToScreen(_fakeCursor);
+        Point local = child.PointFromScreen(screen);
+        return HitTestVisible(child, local);
     }
 
     // ---- Fake-cursor helpers --------------------------------------------------------------
 
     private void MoveFakeCursor()
     {
-        // The arrow's tip is authored at (0,0), so the translate is simply the cursor position.
-        FakeCursorTransform.X = _fakeCursor.X;
-        FakeCursorTransform.Y = _fakeCursor.Y;
+        // Runs per raw-input packet (up to ~1000 Hz): convert to screen pixels and record the
+        // target — the cursor window repositions itself once per composed frame.
+        if (_cursorWindow is null || PresentationSource.FromVisual(RootCanvas) is null)
+            return;
+        _cursorWindow.MoveTo(RootCanvas.PointToScreen(_fakeCursor));
     }
 
     // Scales the vector arrow to match the real cursor's on-screen size. The real cursor's physical
@@ -485,13 +769,42 @@ public partial class MainWindow : Window
         int baseSize = NativePointer.GetCursorBaseSize();
 
         double scale = baseSize * monitorScale / (32.0 * windowScale) * CursorSizeScale;
-        FakeCursorScale.ScaleX = scale;
-        FakeCursorScale.ScaleY = scale;
+        _cursorWindow?.SetScale(scale);
 
         // Diagnostic: surfaces the real numbers in the Logs panel so cursor sizing can be verified.
         Services.Logging.Log.Info(
             $"Cursor scale: windowScale={windowScale:0.##} monitorDpiScale={monitorScale:0.##} " +
             $"baseSize={baseSize} sizeKnob={CursorSizeScale:0.##} -> scale={scale:0.###}", "Cursor");
+    }
+
+    // Maps the fake cursor's position across a horizontal slider's width onto its value range.
+    private void SetSliderValueFromCursor(Slider slider)
+    {
+        if (slider.ActualWidth <= 0)
+            return;
+        Point local = RootCanvas.TranslatePoint(_fakeCursor, slider);
+        double fraction = Math.Clamp(local.X / slider.ActualWidth, 0, 1);
+        slider.Value = slider.Minimum + fraction * (slider.Maximum - slider.Minimum);
+    }
+
+    // Maps the fake cursor's position along a scrollbar's track onto its owner's scroll offset.
+    private void SetScrollFromCursor(ScrollBar bar, ScrollViewer owner)
+    {
+        Point local = RootCanvas.TranslatePoint(_fakeCursor, bar);
+        if (bar.Orientation == Orientation.Vertical)
+        {
+            if (bar.ActualHeight <= 0)
+                return;
+            double fraction = Math.Clamp(local.Y / bar.ActualHeight, 0, 1);
+            owner.ScrollToVerticalOffset(fraction * owner.ScrollableHeight);
+        }
+        else
+        {
+            if (bar.ActualWidth <= 0)
+                return;
+            double fraction = Math.Clamp(local.X / bar.ActualWidth, 0, 1);
+            owner.ScrollToHorizontalOffset(fraction * owner.ScrollableWidth);
+        }
     }
 
     // Extends the active text-box selection from the press anchor to the character under the cursor.
@@ -521,10 +834,31 @@ public partial class MainWindow : Window
     }
 
     /// <summary>Hit-tests the visual tree at a RootCanvas point; returns the top-most hit visual.</summary>
-    private DependencyObject? HitTest(Point point)
+    private DependencyObject? HitTest(Point point) => HitTestVisible(RootCanvas, point);
+
+    /// <summary>
+    /// Hit test that honours visibility, unlike the simple <see cref="VisualTreeHelper.HitTest(Visual, Point)"/>
+    /// overload, which ignores IsVisible and IsHitTestVisible. Collapsed elements keep their
+    /// retained render data, so without the filter the settings/log panes stacked above the chat
+    /// surface (and the first-run gate) keep swallowing every hit at their old bounds after
+    /// they've been shown once — real mouse input never sees them because WPF's input pipeline
+    /// applies exactly this filtering.
+    /// </summary>
+    private static DependencyObject? HitTestVisible(Visual root, Point point)
     {
-        HitTestResult? result = VisualTreeHelper.HitTest(RootCanvas, point);
-        return result?.VisualHit;
+        DependencyObject? hit = null;
+        VisualTreeHelper.HitTest(
+            root,
+            candidate => candidate is UIElement { IsVisible: false } or UIElement { IsHitTestVisible: false }
+                ? HitTestFilterBehavior.ContinueSkipSelfAndChildren
+                : HitTestFilterBehavior.Continue,
+            result =>
+            {
+                hit = result.VisualHit;
+                return HitTestResultBehavior.Stop;
+            },
+            new PointHitTestParameters(point));
+        return hit;
     }
 
     private static void InvokeButton(ButtonBase button)
@@ -630,6 +964,23 @@ public partial class MainWindow : Window
         base.OnPreviewKeyDown(e);
     }
 
+    /// <summary>
+    /// Keeps the chat pinned to the newest content, but only while the user is already at the
+    /// bottom — scrolling up to read history stays put. Driven by ScrollChanged (not
+    /// CollectionChanged like the other panels) so it also follows the last bubble growing while
+    /// a response streams in.
+    /// </summary>
+    private void MessagesScroll_ScrollChanged(object sender, ScrollChangedEventArgs e)
+    {
+        if (e.ExtentHeightChange == 0)
+            return;   // pure scroll movement, not content growth
+
+        // At the bottom *before* this content change (small tolerance for rounding).
+        double previousExtent = e.ExtentHeight - e.ExtentHeightChange;
+        if (e.VerticalOffset >= previousExtent - e.ViewportHeight - 1.0)
+            MessagesScroll.ScrollToEnd();
+    }
+
     // ---- Window chrome interactions -------------------------------------------------------
 
     private void Minimize_Click(object sender, RoutedEventArgs e)
@@ -640,6 +991,62 @@ public partial class MainWindow : Window
     }
 
     private void Close_Click(object sender, RoutedEventArgs e) => Close();
+
+    // ---- First-run provider gate ------------------------------------------------------------
+
+    /// <summary>
+    /// Validates the gate's Base URL + API key: pulls the secret out of whichever key box is
+    /// visible (PasswordBox intentionally has no binding) and hands it to the view model, which
+    /// persists the pair and probes the provider's /models endpoint.
+    /// </summary>
+    private void GateValidate_Click(object sender, RoutedEventArgs e)
+    {
+        _vm.Settings.APIKeyInput =
+            GateKeyPeek.IsChecked == true ? GateKeyPlainBox.Text : GateKeyBox.Password;
+        _vm.Settings.ValidateGateCommand.Execute(null);
+    }
+
+    /// <summary>
+    /// Commits the gate: stores any optional channel keys typed in, saves the settings, and
+    /// dismisses the gate so the overlay cards appear. Enabled only after a successful Validate.
+    /// </summary>
+    private void GateUnlock_Click(object sender, RoutedEventArgs e)
+    {
+        if (!_vm.Settings.GateKeyValidated)
+            return;
+
+        _vm.Settings.AzureSpeechKeyInput = GateAzureKeyBox.Password;
+        _vm.Settings.WebSearchKeyInput = GateTavilyKeyBox.Password;
+        _vm.Settings.SaveCommand.Execute(null);
+
+        GateKeyBox.Clear();
+        GateKeyPlainBox.Clear();
+        GateAzureKeyBox.Clear();
+        GateTavilyKeyBox.Clear();
+        _vm.IsGateOpen = false;
+    }
+
+    /// <summary>Peek on: mirror the secret into the visible plain box.</summary>
+    private void GatePeek_Checked(object sender, RoutedEventArgs e)
+    {
+        GateKeyPlainBox.Text = GateKeyBox.Password;
+        GateKeyPlainBox.Visibility = Visibility.Visible;
+        GateKeyBox.Visibility = Visibility.Collapsed;
+    }
+
+    /// <summary>Peek off: mirror any edits back into the masked box.</summary>
+    private void GatePeek_Unchecked(object sender, RoutedEventArgs e)
+    {
+        GateKeyBox.Password = GateKeyPlainBox.Text;
+        GateKeyBox.Visibility = Visibility.Visible;
+        GateKeyPlainBox.Visibility = Visibility.Collapsed;
+    }
+
+    private void GateGetKey_Click(object sender, RoutedEventArgs e)
+    {
+        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(
+            "https://platform.openai.com/api-keys") { UseShellExecute = true });
+    }
 
     private void SaveSettings_Click(object sender, RoutedEventArgs e)
     {
@@ -664,6 +1071,7 @@ public partial class MainWindow : Window
         _hotkeys.Dispose();
         _capture.Dispose();
         _vm.Speech.Dispose();
+        _cursorWindow?.Close();
         _hiddenOwner?.Close();
         base.OnClosing(e);
         Application.Current.Shutdown();
