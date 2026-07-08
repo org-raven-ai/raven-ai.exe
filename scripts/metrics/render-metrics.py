@@ -9,8 +9,9 @@ static SVGs suitable for embedding in a README:
 
   metrics-loc.svg              -- lines of code over time
   metrics-activity.svg         -- commits and merged PRs over time
-  metrics-loc-by-language.svg  -- LOC per language, stacked (needs snapshots
-                                  with loc_by_language; skipped until one exists)
+  metrics-loc-by-language.svg  -- donut of the current LOC per language (needs
+                                  snapshots with loc_by_language; skipped until
+                                  one exists)
   metrics-commits-per-day.svg  -- commits per calendar day
   metrics-churn-per-day.svg    -- lines added/removed per day
   metrics-prs-per-week.svg     -- merged PRs per ISO week
@@ -182,38 +183,63 @@ def render_snapshot_charts(series, out_dir: Path, preview_png: bool):
 
 
 def render_loc_by_language(series, out_dir: Path, preview_png: bool):
+    """Donut of the LATEST snapshot's per-language LOC, every count stated."""
     with_languages = [entry for entry in series if entry.get("loc_by_language")]
     if not with_languages:
         print("No snapshots carry loc_by_language yet; skipping the language chart.")
         return
 
-    latest = with_languages[-1]["loc_by_language"]
-    ranked = sorted(latest, key=latest.get, reverse=True)
+    newest = with_languages[-1]
+    breakdown = newest["loc_by_language"]
+    ranked = sorted(breakdown, key=breakdown.get, reverse=True)
     top = ranked[:MAX_LANGUAGE_SLOTS]
-    all_languages = {lang for entry in with_languages for lang in entry["loc_by_language"]}
-    has_other = bool(all_languages - set(top))
-
-    dates = [datetime.fromisoformat(entry["date"]) for entry in with_languages]
-    stacks, labels, colors = [], [], []
-    for slot, language in enumerate(top):
-        stacks.append([entry["loc_by_language"].get(language, 0) for entry in with_languages])
-        labels.append(language)
-        colors.append(CATEGORICAL[slot])
-    if has_other:
-        stacks.append(
-            [
-                sum(count for lang, count in entry["loc_by_language"].items() if lang not in top)
-                for entry in with_languages
-            ]
-        )
+    labels = list(top)
+    values = [breakdown[language] for language in top]
+    colors = CATEGORICAL[: len(top)]
+    other = sum(breakdown[language] for language in ranked[MAX_LANGUAGE_SLOTS:])
+    if other:
         labels.append("Other")
+        values.append(other)
         colors.append(OTHER_GRAY)
+    total = sum(values)
 
-    fig, ax = new_axes("Lines of code by language")
-    polys = ax.stackplot(dates, stacks, colors=colors, linewidth=1, edgecolor=SURFACE)
-    ax.set_ylim(bottom=0)
-    day_axis(ax, dates)
-    add_legend(ax, labels, polys)
+    fig, ax = plt.subplots(figsize=(8, 3.6), dpi=100)
+    fig.set_facecolor(SURFACE)
+    ax.set_facecolor(SURFACE)
+    ax.set_title(
+        "Lines of code by language", loc="left", color=PRIMARY_INK, fontweight="bold", pad=12
+    )
+    wedges, _ = ax.pie(
+        values,
+        colors=colors,
+        startangle=90,  # largest slice starts at 12 o'clock,
+        counterclock=False,  # reading clockwise in size order
+        wedgeprops={"width": 0.38, "edgecolor": SURFACE, "linewidth": 2},
+    )
+    ax.text(
+        0, 0.10, f"{total:,}", ha="center", va="center",
+        color=PRIMARY_INK, fontsize=17, fontweight="bold",
+    )
+    ax.text(0, -0.16, "lines of code", ha="center", va="center", color=MUTED, fontsize=9)
+    # Every slice's exact count lives in the list beside the donut, so no
+    # label ever collides on thin slices.
+    ax.legend(
+        wedges,
+        [
+            f"{label} — {value:,} ({value / total:.1%})"
+            for label, value in zip(labels, values)
+        ],
+        loc="center left",
+        bbox_to_anchor=(1.02, 0.5),
+        frameon=False,
+        fontsize=10,
+        labelcolor=SECONDARY_INK,
+        handlelength=1.0,
+    )
+    ax.text(
+        0, -1.28, f"as of {newest['date'][:10]} · {newest['sha']}",
+        ha="center", va="center", color=MUTED, fontsize=8,
+    )
     save(fig, out_dir / "metrics-loc-by-language.svg", preview_png)
 
 

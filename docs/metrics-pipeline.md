@@ -44,7 +44,7 @@ the append, re-render).
 | SVG on `metrics` | Shows |
 |---|---|
 | `metrics-loc.svg` | total lines of code over time |
-| `metrics-loc-by-language.svg` | LOC stacked by language (top 5 + Other) |
+| `metrics-loc-by-language.svg` | donut of the current LOC per language (top 5 + Other), each count stated |
 | `metrics-activity.svg` | cumulative commits and merged PRs |
 | `metrics-commits-per-day.svg` | commits per calendar day |
 | `metrics-churn-per-day.svg` | lines added/removed per day |
