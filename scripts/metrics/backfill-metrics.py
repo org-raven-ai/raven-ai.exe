@@ -13,6 +13,7 @@ squash/merge-commit workflows) and records, per commit:
   date       -- committer date, UTC ISO-8601
   sha        -- short sha
   loc        -- total lines of code at that commit, counted with scc
+  loc_by_language -- the same count broken down per language
   commits    -- number of commits on the branch up to and including it
   merged_prs -- APPROXIMATION: commits whose subject ends with "(#N)", the
                 marker GitHub adds to squash/merge commits. The recurring
@@ -43,7 +44,7 @@ def git(*args: str, repo: str) -> bytes:
     ).stdout
 
 
-def count_loc(repo: str, sha: str) -> int:
+def count_loc(repo: str, sha: str) -> tuple[int, dict[str, int]]:
     tar_bytes = git("archive", "--format=tar", sha, repo=repo)
     with tempfile.TemporaryDirectory() as tree_dir:
         with tarfile.open(fileobj=io.BytesIO(tar_bytes)) as tar:
@@ -51,7 +52,8 @@ def count_loc(repo: str, sha: str) -> int:
         scc = subprocess.run(
             ["scc", "--format", "json", tree_dir], check=True, capture_output=True
         )
-    return sum(language["Code"] for language in json.loads(scc.stdout))
+    by_language = {language["Name"]: language["Code"] for language in json.loads(scc.stdout)}
+    return sum(by_language.values()), by_language
 
 
 def main() -> int:
@@ -79,13 +81,15 @@ def main() -> int:
             .strftime("%Y-%m-%dT%H:%M:%SZ")
         )
         short_sha = git("rev-parse", "--short", sha, repo=args.repo).decode().strip()
+        loc, loc_by_language = count_loc(args.repo, sha)
         entries.append(
             {
                 "date": date,
                 "sha": short_sha,
-                "loc": count_loc(args.repo, sha),
+                "loc": loc,
                 "commits": position,
                 "merged_prs": merged_prs,
+                "loc_by_language": loc_by_language,
             }
         )
         print(f"[{position}/{len(shas)}] {short_sha} {date} loc={entries[-1]['loc']}", file=sys.stderr)
