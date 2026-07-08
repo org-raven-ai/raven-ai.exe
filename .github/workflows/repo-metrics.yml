@@ -47,23 +47,34 @@ jobs:
           go install "github.com/boyter/scc/v3@${SCC_VERSION}"
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
 
-      - name: Compute snapshot
+      - name: Fetch merged PR dates
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          loc=$(scc --format json . | jq '[.[].Code] | add')
-          # Commits on main (under squash merges: one per PR).
-          commits=$(git rev-list --count HEAD)
-          merged_prs=$(gh api "search/issues?q=repo:${GITHUB_REPOSITORY}+is:pr+is:merged" --jq '.total_count')
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/pulls?state=closed&per_page=100" \
+            --jq '.[] | select(.merged_at != null) | .merged_at' \
+            | jq --raw-input --slurp 'split("\n") | map(select(length > 0))' \
+            > "$RUNNER_TEMP/merged-pr-dates.json"
+
+      - name: Compute snapshot
+        run: |
+          scc --format json . > "$RUNNER_TEMP/scc.json"
           jq --null-input \
              --arg date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
              --arg sha "$(git rev-parse --short HEAD)" \
-             --argjson loc "$loc" \
-             --argjson commits "$commits" \
-             --argjson merged_prs "$merged_prs" \
-             '{date: $date, sha: $sha, loc: $loc, commits: $commits, merged_prs: $merged_prs}' \
+             --argjson loc "$(jq '[.[].Code] | add' "$RUNNER_TEMP/scc.json")" \
+             --argjson loc_by_language "$(jq 'map({(.Name): .Code}) | add' "$RUNNER_TEMP/scc.json")" \
+             --argjson commits "$(git rev-list --count HEAD)" \
+             --argjson merged_prs "$(jq length "$RUNNER_TEMP/merged-pr-dates.json")" \
+             '{date: $date, sha: $sha, loc: $loc, commits: $commits,
+               merged_prs: $merged_prs, loc_by_language: $loc_by_language}' \
              > "$RUNNER_TEMP/snapshot.json"
           cat "$RUNNER_TEMP/snapshot.json"
+
+      - name: Compute history metrics
+        run: |
+          python scripts/metrics/compute-history.py \
+            "$RUNNER_TEMP/merged-pr-dates.json" "$RUNNER_TEMP/history.json"
 
       - name: Check out metrics branch
         run: |
@@ -85,7 +96,8 @@ jobs:
           # concurrency queue serializes) can never clobber a data point.
           for attempt in 1 2 3 4 5; do
             python "$GITHUB_WORKSPACE/scripts/metrics/append-snapshot.py" "$RUNNER_TEMP/snapshot.json" metrics.json
-            python "$GITHUB_WORKSPACE/scripts/metrics/render-metrics.py" metrics.json .
+            cp "$RUNNER_TEMP/history.json" history.json
+            python "$GITHUB_WORKSPACE/scripts/metrics/render-metrics.py" metrics.json history.json .
             git add --all
             if git diff --cached --quiet; then
               echo "Snapshot already recorded; nothing to push."
