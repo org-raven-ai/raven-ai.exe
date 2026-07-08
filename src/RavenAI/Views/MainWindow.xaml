@@ -355,7 +355,7 @@
             <!-- ============================================================================= -->
             <!-- ===== Agent chat card (right; drag its title bar to move) =================== -->
             <!-- ============================================================================= -->
-            <Border x:Name="ChatCard" Width="420" Height="560"
+            <Border x:Name="ChatCard" Width="520" Height="560"
                     Background="{StaticResource CardFaceBrush}" CornerRadius="16"
                     BorderBrush="{StaticResource LineBrush}" BorderThickness="1"
                     Visibility="{Binding IsGateOpen, Converter={StaticResource BoolToVisibility}, ConverterParameter=Invert}">
