@@ -943,6 +943,23 @@ public partial class MainWindow : Window
         base.OnPreviewKeyDown(e);
     }
 
+    /// <summary>
+    /// Keeps the chat pinned to the newest content, but only while the user is already at the
+    /// bottom — scrolling up to read history stays put. Driven by ScrollChanged (not
+    /// CollectionChanged like the other panels) so it also follows the last bubble growing while
+    /// a response streams in.
+    /// </summary>
+    private void MessagesScroll_ScrollChanged(object sender, ScrollChangedEventArgs e)
+    {
+        if (e.ExtentHeightChange == 0)
+            return;   // pure scroll movement, not content growth
+
+        // At the bottom *before* this content change (small tolerance for rounding).
+        double previousExtent = e.ExtentHeight - e.ExtentHeightChange;
+        if (e.VerticalOffset >= previousExtent - e.ViewportHeight - 1.0)
+            MessagesScroll.ScrollToEnd();
+    }
+
     // ---- Window chrome interactions -------------------------------------------------------
 
     private void Minimize_Click(object sender, RoutedEventArgs e)

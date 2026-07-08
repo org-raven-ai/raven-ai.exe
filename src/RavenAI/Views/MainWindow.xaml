@@ -509,7 +509,8 @@
                              scrollbar input goes dead. -->
                         <ScrollViewer Grid.Row="0" x:Name="MessagesScroll" Margin="8"
                                       Background="Transparent"
-                                      VerticalScrollBarVisibility="Auto">
+                                      VerticalScrollBarVisibility="Auto"
+                                      ScrollChanged="MessagesScroll_ScrollChanged">
                             <ItemsControl ItemsSource="{Binding Chat.Messages}">
                                 <ItemsControl.ItemTemplate>
                                     <DataTemplate>
