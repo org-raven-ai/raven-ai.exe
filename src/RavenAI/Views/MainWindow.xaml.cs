@@ -135,14 +135,14 @@ public partial class MainWindow : Window
         Width = SystemParameters.VirtualScreenWidth;
         Height = SystemParameters.VirtualScreenHeight;
 
-        Loaded += (_, _) => PlaceCardsTopRight();
+        Loaded += (_, _) => PlaceCardsCentered();
     }
 
     /// <summary>
-    /// Places the two floating cards near the top-right of the primary working area (once): the chat
-    /// card on the right, the transcription-staging card immediately to its left.
+    /// Places the two floating cards centered in the primary working area (once), side by side:
+    /// the transcription-staging card on the left, the agent chat card immediately to its right.
     /// </summary>
-    private void PlaceCardsTopRight()
+    private void PlaceCardsCentered()
     {
         if (_panelPlaced)
             return;
@@ -151,13 +151,14 @@ public partial class MainWindow : Window
         const double gap = 12;
         var wa = SystemParameters.WorkArea;
         // WorkArea is in screen coordinates; the canvas origin is the window's top-left.
-        double top = wa.Top + 24 - Top;
-        double chatLeft = wa.Right - ChatCard.Width - 24 - Left;
+        double pairWidth = StagingCard.Width + gap + ChatCard.Width;
+        double stagingLeft = wa.Left + (wa.Width - pairWidth) / 2 - Left;
+        double top = wa.Top + Math.Max(0, (wa.Height - Math.Max(StagingCard.Height, ChatCard.Height)) / 2) - Top;
 
-        Canvas.SetLeft(ChatCard, chatLeft);
-        Canvas.SetTop(ChatCard, top);
-        Canvas.SetLeft(StagingCard, chatLeft - StagingCard.Width - gap);
+        Canvas.SetLeft(StagingCard, stagingLeft);
         Canvas.SetTop(StagingCard, top);
+        Canvas.SetLeft(ChatCard, stagingLeft + StagingCard.Width + gap);
+        Canvas.SetTop(ChatCard, top);
 
         // The first-run gate floats centered in the primary work area (upper third).
         Canvas.SetLeft(GateCard, (wa.Left + wa.Right - GateCard.Width) / 2 - Left);
