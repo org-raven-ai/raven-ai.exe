@@ -1,0 +1,105 @@
+# Records a repository-metrics snapshot (lines of code, commit count, merged
+# PR count) on every push to main, appends it to metrics.json on the orphan
+# `metrics` branch, re-renders the SVG graphs with matplotlib, and pushes the
+# result back to `metrics`. Nothing generated is ever committed to main.
+#
+# Loop guard: this workflow listens ONLY on pushes to `main` and pushes ONLY
+# to `metrics`, so it cannot retrigger itself. If you ever make it push to
+# main, add a paths/branches filter or a commit-message guard first.
+
+name: Repo metrics
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write # push to the metrics branch
+  pull-requests: read # count merged PRs via the API
+
+# Serialize runs so rapid successive merges never race on metrics.json.
+# cancel-in-progress must stay false: a cancelled run is a lost data point.
+concurrency:
+  group: repo-metrics
+  cancel-in-progress: false
+
+env:
+  SCC_VERSION: v3.4.0
+
+jobs:
+  record:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out main
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history for the commit count
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          pip install --requirement scripts/metrics/requirements.txt
+          go install "github.com/boyter/scc/v3@${SCC_VERSION}"
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: Compute snapshot
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          loc=$(scc --format json . | jq '[.[].Code] | add')
+          # Commits on main (under squash merges: one per PR).
+          commits=$(git rev-list --count HEAD)
+          merged_prs=$(gh api "search/issues?q=repo:${GITHUB_REPOSITORY}+is:pr+is:merged" --jq '.total_count')
+          jq --null-input \
+             --arg date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+             --arg sha "$(git rev-parse --short HEAD)" \
+             --argjson loc "$loc" \
+             --argjson commits "$commits" \
+             --argjson merged_prs "$merged_prs" \
+             '{date: $date, sha: $sha, loc: $loc, commits: $commits, merged_prs: $merged_prs}' \
+             > "$RUNNER_TEMP/snapshot.json"
+          cat "$RUNNER_TEMP/snapshot.json"
+
+      - name: Check out metrics branch
+        run: |
+          if git ls-remote --exit-code --heads origin metrics > /dev/null; then
+            git fetch origin metrics
+            git worktree add -b metrics "$RUNNER_TEMP/metrics-branch" origin/metrics
+          else
+            # First run: bootstrap `metrics` as an orphan branch (no shared
+            # history with main).
+            git worktree add --detach "$RUNNER_TEMP/metrics-branch"
+            git -C "$RUNNER_TEMP/metrics-branch" checkout --orphan metrics
+            git -C "$RUNNER_TEMP/metrics-branch" rm -rf --quiet . || true
+          fi
+
+      - name: Append snapshot, render graphs, push
+        working-directory: ${{ runner.temp }}/metrics-branch
+        run: |
+          # Push with rebase-and-retry so a concurrent run (beyond what the
+          # concurrency queue serializes) can never clobber a data point.
+          for attempt in 1 2 3 4 5; do
+            python "$GITHUB_WORKSPACE/scripts/metrics/append-snapshot.py" "$RUNNER_TEMP/snapshot.json" metrics.json
+            python "$GITHUB_WORKSPACE/scripts/metrics/render-metrics.py" metrics.json .
+            git add --all
+            if git diff --cached --quiet; then
+              echo "Snapshot already recorded; nothing to push."
+              exit 0
+            fi
+            git -c user.name="github-actions[bot]" \
+                -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+                commit --message "Record metrics for $(jq --raw-output .sha "$RUNNER_TEMP/snapshot.json")"
+            if git push origin metrics; then
+              exit 0
+            fi
+            echo "Push rejected (concurrent update); re-fetching metrics and retrying ($attempt/5)."
+            git fetch origin metrics
+            git reset --hard origin/metrics
+          done
+          echo "::error::Failed to push metrics after 5 attempts."
+          exit 1
