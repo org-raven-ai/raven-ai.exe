@@ -254,7 +254,11 @@
                     </StackPanel>
 
                     <!-- Staged (committed) messages: system audio left/cyan, microphone right/violet. -->
+                    <!-- Background=Transparent so the fake cursor's hit-test resolves inside the
+                         viewer even over the empty space around bubbles — hit-testing is how the
+                         wheel/scrollbar handlers find which ScrollViewer to drive. -->
                     <ScrollViewer Grid.Row="2" x:Name="StagingScroll" Margin="8,6"
+                                  Background="Transparent"
                                   VerticalScrollBarVisibility="Auto">
                         <ItemsControl ItemsSource="{Binding Staged}">
                             <ItemsControl.ItemTemplate>
@@ -498,8 +502,13 @@
                             <RowDefinition Height="Auto" />
                         </Grid.RowDefinitions>
 
-                        <!-- Message list: assistant left with shield avatar, user right in violet -->
+                        <!-- Message list: assistant left with shield avatar, user right in violet.
+                             Background=Transparent: the fake cursor scrolls whatever ScrollViewer
+                             its hit-test lands in, and chat bubbles are narrow — without a
+                             background the empty areas fall through to the card face and wheel /
+                             scrollbar input goes dead. -->
                         <ScrollViewer Grid.Row="0" x:Name="MessagesScroll" Margin="8"
+                                      Background="Transparent"
                                       VerticalScrollBarVisibility="Auto">
                             <ItemsControl ItemsSource="{Binding Chat.Messages}">
                                 <ItemsControl.ItemTemplate>
@@ -623,7 +632,8 @@
                             <Border Grid.Row="1" Background="{StaticResource Ink2Brush}"
                                     BorderBrush="{StaticResource Line2Brush}" BorderThickness="1"
                                     CornerRadius="10" Padding="6">
-                                <ScrollViewer x:Name="LogScroll" VerticalScrollBarVisibility="Auto">
+                                <ScrollViewer x:Name="LogScroll" Background="Transparent"
+                                              VerticalScrollBarVisibility="Auto">
                                     <ItemsControl ItemsSource="{Binding Entries}">
                                         <ItemsControl.ItemTemplate>
                                             <DataTemplate>
@@ -691,7 +701,8 @@
                             <TabControl Grid.Row="1">
                                 <!-- ===== Provider ===== -->
                                 <TabItem Header="Provider">
-                                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                    <ScrollViewer Background="Transparent"
+                                                  VerticalScrollBarVisibility="Auto">
                                         <StackPanel Margin="0,0,4,0">
                                             <TextBlock Style="{StaticResource LabelCaption}" Text="BASE URL" />
                                             <TextBox Text="{Binding BaseURL}" Margin="0,0,0,12" />
@@ -753,7 +764,8 @@
 
                                 <!-- ===== Voice ===== -->
                                 <TabItem Header="Voice">
-                                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                    <ScrollViewer Background="Transparent"
+                                                  VerticalScrollBarVisibility="Auto">
                                         <StackPanel Margin="0,0,4,0">
                                             <TextBlock Style="{StaticResource LabelCaption}" Text="SPEECH-TO-TEXT MODEL" />
                                             <ComboBox IsEditable="True" IsTextSearchEnabled="True" Margin="0,0,0,12"
@@ -818,7 +830,8 @@
 
                                 <!-- ===== Search ===== -->
                                 <TabItem Header="Search">
-                                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                    <ScrollViewer Background="Transparent"
+                                                  VerticalScrollBarVisibility="Auto">
                                         <StackPanel Margin="0,0,4,0">
                                             <StackPanel Orientation="Horizontal" Margin="0,0,0,9">
                                                 <Ellipse Width="7" Height="7" Fill="{StaticResource VioletBrush}"
@@ -866,7 +879,8 @@
 
                                 <!-- ===== Appearance ===== -->
                                 <TabItem Header="Appearance">
-                                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                    <ScrollViewer Background="Transparent"
+                                                  VerticalScrollBarVisibility="Auto">
                                         <StackPanel Margin="0,0,4,0">
                                             <Grid Margin="0,0,0,8">
                                                 <Grid.ColumnDefinitions>
