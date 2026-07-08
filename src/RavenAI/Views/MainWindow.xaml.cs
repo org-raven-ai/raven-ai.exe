@@ -736,7 +736,7 @@ public partial class MainWindow : Window
 
         Point screen = RootCanvas.PointToScreen(_fakeCursor);
         Point local = child.PointFromScreen(screen);
-        return VisualTreeHelper.HitTest(child, local)?.VisualHit;
+        return HitTestVisible(child, local);
     }
 
     // ---- Fake-cursor helpers --------------------------------------------------------------
@@ -834,10 +834,31 @@ public partial class MainWindow : Window
     }
 
     /// <summary>Hit-tests the visual tree at a RootCanvas point; returns the top-most hit visual.</summary>
-    private DependencyObject? HitTest(Point point)
+    private DependencyObject? HitTest(Point point) => HitTestVisible(RootCanvas, point);
+
+    /// <summary>
+    /// Hit test that honours visibility, unlike the simple <see cref="VisualTreeHelper.HitTest(Visual, Point)"/>
+    /// overload, which ignores IsVisible and IsHitTestVisible. Collapsed elements keep their
+    /// retained render data, so without the filter the settings/log panes stacked above the chat
+    /// surface (and the first-run gate) keep swallowing every hit at their old bounds after
+    /// they've been shown once — real mouse input never sees them because WPF's input pipeline
+    /// applies exactly this filtering.
+    /// </summary>
+    private static DependencyObject? HitTestVisible(Visual root, Point point)
     {
-        HitTestResult? result = VisualTreeHelper.HitTest(RootCanvas, point);
-        return result?.VisualHit;
+        DependencyObject? hit = null;
+        VisualTreeHelper.HitTest(
+            root,
+            candidate => candidate is UIElement { IsVisible: false } or UIElement { IsHitTestVisible: false }
+                ? HitTestFilterBehavior.ContinueSkipSelfAndChildren
+                : HitTestFilterBehavior.Continue,
+            result =>
+            {
+                hit = result.VisualHit;
+                return HitTestResultBehavior.Stop;
+            },
+            new PointHitTestParameters(point));
+        return hit;
     }
 
     private static void InvokeButton(ButtonBase button)
